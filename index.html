@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABC Pickleyard – Court Queue</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+</head>
+<body>
+
+  <!-- ========== HEADER ========== -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo-area" id="logoBtn" title="Click to change logo">
+        <img id="logoImg" hidden alt="Logo" />
+        <div id="logoPlaceholder" class="logo-placeholder">
+          <i class="fas fa-table-tennis-paddle-ball"></i>
+        </div>
+        <input type="file" id="logoInput" accept="image/*" hidden />
+      </div>
+      <div>
+        <h1>ABC Pickleyard</h1>
+        <p>Pickleball court & Player management</p>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="stats">
+        <div class="stat">
+          <strong id="statWaiting">0</strong>
+          <span>WAITING</span>
+        </div>
+        <div class="stat">
+          <strong id="statAvg">–</strong>
+          <span>avg game</span>
+        </div>
+      </div>
+      <div class="clock">
+        <i class="far fa-clock"></i>
+        <span id="clockTime">00:00:00</span>
+      </div>
+      <button id="darkModeToggle" class="dark-mode-toggle" title="Toggle dark mode">
+        <i class="fas fa-moon"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========== NAV TABS ========== -->
+  <nav class="nav-tabs">
+    <button class="nav-item active" data-tab="court">
+      <span class="nav-title">COURT</span>
+      <span class="nav-sub">Live games</span>
+    </button>
+    <button class="nav-item" data-tab="queue">
+      <span class="nav-title">PLAYERS</span>
+      <span class="nav-sub">Waiting list <span id="navQueueCount" class="badge">0</span></span>
+    </button>
+    <button class="nav-item" data-tab="leaders">
+      <span class="nav-title">LEADERBOARDS</span>
+      <span class="nav-sub">Top players</span>
+    </button>
+  </nav>
+
+  <!-- ========== COURT TAB ========== -->
+  <section id="tab-court" class="tab-panel active">
+    <div class="court-layout">
+      <!-- Left: In Play -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="status-line">
+            <span class="dot" id="liveDot"></span>
+            <div>
+              <h2>IN PLAY</h2>
+              <p>Current game on the court</p>
+            </div>
+          </div>
+          <span class="live-count" id="liveCount">0 live</span>
+        </div>
+
+        <div id="courtCard">
+          <!-- rendered by JS -->
+        </div>
+
+        <div class="action-row">
+          <button class="btn btn-primary" id="startGameBtn">
+            <i class="fas fa-play"></i> Start Game
+          </button>
+          <button class="btn btn-outline" id="addPlayerBtn">
+            <i class="fas fa-user-plus"></i> Add Player
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Next Up -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>NEXT UP</h2>
+        </div>
+        <div id="nextGames" class="next-games">
+          <!-- rendered by JS -->
+        </div>
+        <a href="#" id="seeFullBoard" class="see-full">See full board →</a>
+      </div>
+    </div>
+
+    <!-- Player of the Night / Top 3 -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>PLAYER OF THE NIGHT</h2>
+      </div>
+      <div id="top3List">
+        <!-- rendered by JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== PLAYERS / QUEUE TAB ========== -->
+  <section id="tab-queue" class="tab-panel">
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>WAITING PLAYERS</h2>
+          <p>Players waiting for their turn</p>
+        </div>
+      </div>
+
+      <div class="capacity-card">
+        <div class="capacity-top">
+          <div>
+            <h3>Player Capacity</h3>
+            <p>Maximum 20 players</p>
+          </div>
+          <div class="capacity-num">
+            <span id="capacityCount">0</span><span class="max">/20</span>
+          </div>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="capacityProgress" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div id="queueList">
+        <!-- rendered by JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== LEADERBOARDS TAB ========== -->
+  <section id="tab-leaders" class="tab-panel">
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>LEADERBOARDS</h2>
+          <p>Players with the most wins</p>
+        </div>
+        <button class="btn btn-ghost" id="resetAll" title="Reset everything">
+          <i class="fas fa-trash-alt"></i> Reset All
+        </button>
+      </div>
+      <div id="leaderList">
+        <!-- rendered by JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== MODAL ========== -->
+  <div id="modalOverlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Modal</h3>
+        <button id="modalClose" class="modal-close">&times;</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="index.js"></script>
+</body>
+</html>
