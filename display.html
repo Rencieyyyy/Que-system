@@ -118,6 +118,7 @@
       max-width: 1400px;
       margin: 0 auto;
       box-sizing: border-box;
+      overflow-y: auto;
     }
 
     .display-grid {
@@ -126,6 +127,7 @@
       gap: 16px;
       flex: 1;
       min-height: 0;
+      align-items: start; /* panels size to their own content, don't force-stretch each other */
     }
 
     .display-panel {
@@ -138,6 +140,18 @@
       flex-direction: column;
       overflow: hidden;
       position: relative;
+    }
+
+    /* IN PLAY should still fill the full available height on its side */
+    #inPlayPanel {
+      height: 100%;
+      align-self: stretch;
+    }
+
+    /* NEXT UP only takes as much height as its content needs */
+    #nextUpPanel {
+      align-self: start;
+      max-height: 100%;
     }
 
     .display-panel h2 {
@@ -255,19 +269,18 @@
       box-shadow: 0 4px 14px rgba(0,0,0,0.12);
     }
 
-    /* ===== NEXT UP - compact ===== */
+    /* ===== NEXT UP - compact, content-sized ===== */
     #nextGames {
-      flex: 1;
-      overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 10px;
+      overflow-y: visible;
     }
 
     .next-game {
       background: linear-gradient(135deg, var(--primary-light), rgba(90, 196, 173, 0.12));
       border-radius: 12px;
-      padding: 10px 14px;
+      padding: 10px 14px 12px;
       border: 1px solid rgba(90, 196, 173, 0.2);
       margin-bottom: 0;
     }
@@ -286,6 +299,83 @@
       font-weight: 700;
       color: var(--text);
       line-height: 1.3;
+    }
+
+    /* --- Per-player mini boxes inside NEXT UP / LATER --- */
+    .mini-match {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .mini-team {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .mini-vs {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--white);
+      border: 2px solid var(--primary);
+      color: var(--primary-dark);
+      font-weight: 800;
+      font-size: 0.72rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .mini-player {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--white);
+      border: 1px solid rgba(90, 196, 173, 0.3);
+      border-radius: 10px;
+      padding: 6px 10px;
+      min-width: 0;
+    }
+
+    .mini-player .mini-avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #5ac4ad, #3da892);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .mini-player .mini-name {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .mini-players-flat {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .mini-players-flat .mini-player {
+      flex: 0 0 auto;
     }
 
     /* Player of the Night */
@@ -346,6 +436,9 @@
       .court-timer {
         font-size: 2.4rem;
       }
+      #inPlayPanel {
+        height: auto;
+      }
     }
   </style>
 </head>
@@ -387,7 +480,7 @@
       </div>
 
       <!-- NEXT UP -->
-      <div class="display-panel">
+      <div class="display-panel" id="nextUpPanel">
         <h2>NEXT UP</h2>
         <div id="nextGames"></div>
       </div>

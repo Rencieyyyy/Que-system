@@ -56,6 +56,30 @@ function fmtClock(ms) {
   return `${m}:${s}`;
 }
 
+/* Cache team pairings so they don't get re-randomized every 2.5s render tick.
+   Keyed by the sorted player ids in the group — same 4 players = same pairing. */
+let teamsCache = {};
+
+function formTeamsStable(ids) {
+  if (!ids || ids.length < 4) return null;
+  const key = [...ids].sort().join('_');
+  if (teamsCache[key]) return teamsCache[key];
+  const teams = formTeams(ids);
+  teamsCache[key] = teams;
+  return teams;
+}
+
+/* Small player chip used in NEXT UP / LATER */
+function miniPlayerBox(id) {
+  const p = playerById(id) || { name: '—' };
+  const initial = (p.name || '?').charAt(0).toUpperCase();
+  return `
+    <div class="mini-player">
+      <div class="mini-avatar">${escapeHtml(initial)}</div>
+      <div class="mini-name">${escapeHtml(p.name)}</div>
+    </div>`;
+}
+
 /* ---------- State ---------- */
 let players = [];
 let queue = [];
@@ -176,10 +200,43 @@ function renderCourt() {
     </div>`;
 }
 
+/* Build the markup for one queued game: each player gets their own mini box */
+function renderGameGroup(g, title, need) {
+  // Full group of 4 -> try to split into two teams and show them "vs" style
+  if (g.length === 4) {
+    const teams = formTeamsStable(g);
+    if (teams) {
+      return `
+        <div class="next-game">
+          <div class="g-title">${title}${need}</div>
+          <div class="mini-match">
+            <div class="mini-team">
+              ${teams.teamA.map(id => miniPlayerBox(id)).join('')}
+            </div>
+            <div class="mini-vs">VS</div>
+            <div class="mini-team">
+              ${teams.teamB.map(id => miniPlayerBox(id)).join('')}
+            </div>
+          </div>
+        </div>`;
+    }
+  }
+
+  // Fewer than 4 players (still waiting for the group to fill up) -> flat row of boxes
+  return `
+    <div class="next-game">
+      <div class="g-title">${title}${need}</div>
+      <div class="mini-players-flat">
+        ${g.map(id => miniPlayerBox(id)).join('')}
+      </div>
+    </div>`;
+}
+
 function renderNextGames() {
   const el = document.getElementById('nextGames');
 
   if (!queue || queue.length === 0) {
+    teamsCache = {};
     el.innerHTML = `<div class="empty-msg">No upcoming games</div>`;
     return;
   }
@@ -192,26 +249,7 @@ function renderNextGames() {
   el.innerHTML = groups.slice(0, 2).map((g, gi) => {
     const title = gi === 0 ? 'Next' : 'Later';
     const need = g.length < 4 ? ` · needs ${4 - g.length}` : '';
-
-    if (g.length === 4) {
-      const teams = formTeams(g);
-      if (teams) {
-        const a = teams.teamA.map(id => (playerById(id) || { name: '—' }).name).join(' & ');
-        const b = teams.teamB.map(id => (playerById(id) || { name: '—' }).name).join(' & ');
-        return `
-          <div class="next-game">
-            <div class="g-title">${title}${need}</div>
-            <div class="g-list">${escapeHtml(a)} vs ${escapeHtml(b)}</div>
-          </div>`;
-      }
-    }
-
-    const names = g.map(id => (playerById(id) || { name: '—' }).name).join(', ');
-    return `
-      <div class="next-game">
-        <div class="g-title">${title}${need}</div>
-        <div class="g-list">${escapeHtml(names)}</div>
-      </div>`;
+    return renderGameGroup(g, title, need);
   }).join('');
 }
 
