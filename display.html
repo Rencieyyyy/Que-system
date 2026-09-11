@@ -390,31 +390,135 @@
       gap: 8px;
     }
 
-    #top3List .list-row {
-      padding: 11px 15px;
-      border-radius: 11px;
-      transition: transform 0.15s;
-    }
-
-    #top3List .list-row:hover {
-      transform: translateX(4px);
-    }
-
-    #top3List .name {
-      font-size: 1.05rem;
-      font-weight: 700;
-    }
-
-    #top3List .wins {
-      font-size: 0.85rem;
-      padding: 3px 11px;
-    }
-
     .empty-msg {
       text-align: center;
       padding: 28px 12px;
       color: var(--text-muted);
       font-size: 1.05rem;
+    }
+
+    /* ===== Player of the Night — Medal Styling ===== */
+    #top3List .list-row.top3 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 11px 15px;
+      transition: transform 0.15s, box-shadow 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #top3List .list-row.top3:hover {
+      transform: translateX(4px);
+    }
+
+    .row-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Rank badge base (becomes a medal circle) */
+    .rank-badge {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      color: white;
+      flex-shrink: 0;
+      position: relative;
+      font-size: 0; /* hide the number */
+    }
+    .rank-badge::before {
+      font-size: 1.3rem;
+    }
+
+    /* 🥇 1st place */
+    .rank-badge.r1 {
+      background: linear-gradient(135deg, #ffd700, #e0a800);
+      box-shadow: 0 3px 10px rgba(255, 200, 0, 0.5);
+    }
+    .rank-badge.r1::before { content: "🥇"; }
+
+    /* 🥈 2nd place */
+    .rank-badge.r2 {
+      background: linear-gradient(135deg, #d7d7d7, #a8a8a8);
+      box-shadow: 0 3px 10px rgba(160, 160, 160, 0.45);
+    }
+    .rank-badge.r2::before { content: "🥈"; }
+
+    /* 🥉 3rd place */
+    .rank-badge.r3 {
+      background: linear-gradient(135deg, #cd7f32, #a05a1f);
+      box-shadow: 0 3px 10px rgba(180, 110, 40, 0.45);
+    }
+    .rank-badge.r3::before { content: "🥉"; }
+
+    /* Row backgrounds per rank */
+    #top3List .list-row.top3:has(.rank-badge.r1) {
+      background: linear-gradient(135deg, rgba(255, 215, 0, 0.14), rgba(255, 215, 0, 0.03));
+      border: 1px solid rgba(255, 191, 0, 0.5);
+      box-shadow: 0 4px 16px rgba(255, 191, 0, 0.18);
+      transform: scale(1.02);
+    }
+    #top3List .list-row.top3:has(.rank-badge.r2) {
+      background: linear-gradient(135deg, rgba(192, 192, 192, 0.16), rgba(192, 192, 192, 0.03));
+      border: 1px solid rgba(170, 170, 170, 0.5);
+    }
+    #top3List .list-row.top3:has(.rank-badge.r3) {
+      background: linear-gradient(135deg, rgba(205, 127, 50, 0.16), rgba(205, 127, 50, 0.03));
+      border: 1px solid rgba(205, 127, 50, 0.5);
+    }
+
+    /* Name + wins polish */
+    #top3List .name {
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+    #top3List .list-row.top3:has(.rank-badge.r1) .name { color: #a67c00; }
+    #top3List .list-row.top3:has(.rank-badge.r2) .name { color: #6e6e6e; }
+    #top3List .list-row.top3:has(.rank-badge.r3) .name { color: #8a4b1f; }
+
+    #top3List .wins {
+      font-size: 0.85rem;
+      padding: 3px 11px;
+      border-radius: 30px;
+      font-weight: 700;
+      background: var(--primary-light);
+      color: var(--primary-dark);
+    }
+    #top3List .list-row.top3:has(.rank-badge.r1) .wins {
+      background: rgba(255, 191, 0, 0.25);
+      color: #8a6300;
+    }
+    #top3List .list-row.top3:has(.rank-badge.r2) .wins {
+      background: rgba(192, 192, 192, 0.3);
+      color: #5c5c5c;
+    }
+    #top3List .list-row.top3:has(.rank-badge.r3) .wins {
+      background: rgba(205, 127, 50, 0.28);
+      color: #7a4620;
+    }
+
+    /* Shine sweep on #1 only */
+    #top3List .list-row.top3:has(.rank-badge.r1)::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(120deg, transparent 20%, rgba(255,255,255,0.35) 50%, transparent 80%);
+      background-size: 200% 100%;
+      animation: shine 3s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes shine {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
 
     /* Live panel top line */
