@@ -12,15 +12,14 @@
   <!-- ========== HEADER ========== -->
   <header class="header">
     <div class="header-left">
-      <div class="logo-area" id="logoBtn" title="Click to change logo">
-        <img id="logoImg" hidden alt="Logo" />
-        <div id="logoPlaceholder" class="logo-placeholder">
+      <div class="logo-area" id="logoBtn">
+        <img id="logoImg" src="abclogo.jpg" alt="Logo" onerror="this.hidden=true;document.getElementById('logoPlaceholder').hidden=false;" />
+        <div id="logoPlaceholder" class="logo-placeholder" hidden>
           <i class="fas fa-table-tennis-paddle-ball"></i>
         </div>
-        <input type="file" id="logoInput" accept="image/*" hidden />
       </div>
       <div>
-        <h1>ABC Pickleyard</h1>
+        <h1>ABCDink Pickleyard</h1>
         <p>Pickleball court & Player management</p>
       </div>
     </div>
@@ -129,10 +128,10 @@
         <div class="capacity-top">
           <div>
             <h3>Player Capacity</h3>
-            <p>Maximum 20 players</p>
+            <p>Maximum 30 players</p>
           </div>
           <div class="capacity-num">
-            <span id="capacityCount">0</span><span class="max">/20</span>
+            <span id="capacityCount">0</span><span class="max">/30</span>
           </div>
         </div>
         <div class="progress-track">

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ABC Pickleyard – Live Display</title>
+  <title>ABCDink Pickleyard – Live Display</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <style>
@@ -125,8 +125,7 @@
       display: grid;
       grid-template-columns: 1.5fr 1fr;
       gap: 16px;
-      flex: 1;
-      min-height: 0;
+      flex: 0 0 auto;
       align-items: start; /* panels size to their own content, don't force-stretch each other */
     }
 
@@ -138,14 +137,14 @@
       box-shadow: 0 4px 20px rgba(0,0,0,0.06);
       display: flex;
       flex-direction: column;
-      overflow: hidden;
+      overflow: visible;
       position: relative;
     }
 
-    /* IN PLAY should still fill the full available height on its side */
+    /* IN PLAY sizes to its own content — no forced height, so extra
+       player rows never get clipped by the panel edge */
     #inPlayPanel {
-      height: 100%;
-      align-self: stretch;
+      align-self: start;
     }
 
     /* NEXT UP only takes as much height as its content needs */
@@ -578,13 +577,13 @@
   <div class="top-nav">
     <div class="top-nav-left">
       <div class="nav-logo" id="displayLogo">
-        <img id="logoImg" hidden alt="Logo" />
-        <div id="logoPlaceholder" class="nav-logo-placeholder">
+        <img id="logoImg" src="abclogo.jpg" alt="Logo" onerror="this.hidden=true;document.getElementById('logoPlaceholder').hidden=false;" />
+        <div id="logoPlaceholder" class="nav-logo-placeholder" hidden>
           <i class="fas fa-table-tennis-paddle-ball"></i>
         </div>
       </div>
       <div>
-        <h1>ABC Pickleyard</h1>
+        <h1>ABCDink Pickleyard</h1>
         <p>Live Court Display</p>
       </div>
     </div>

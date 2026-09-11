@@ -4,7 +4,6 @@ let queue     = load('cq_queue', []);
 let court     = load('cq_court', null);
 let history   = load('cq_history', []);
 let gameTimes = load('cq_gameTimes', []);
-let logoData  = load('cq_logo', null);
 
 function load(key, fallback) {
   try {
@@ -58,8 +57,8 @@ function addPlayer(name) {
   name = name.trim();
   if (!name) return;
 
-  if (players.length >= 20) {
-    alert('Maximum 20 players reached.');
+  if (players.length >= 30) {
+    alert('Maximum 30 players reached.');
     return;
   }
 
@@ -297,7 +296,7 @@ function renderQueue() {
   els.statWaiting.textContent = queue.length;
   els.navQueueCount.textContent = queue.length;
   els.capacityCount.textContent = players.length;
-  els.capacityProgress.style.width = (players.length / 20 * 100) + '%';
+  els.capacityProgress.style.width = (players.length / 30 * 100) + '%';
 
   if (!queue.length) {
     els.queueList.innerHTML = `<div class="empty-state">Nobody's waiting. Add players to build the queue.</div>`;
@@ -427,8 +426,8 @@ overlay.addEventListener('click', (e) => {
 document.getElementById('modalClose').onclick = closeModal;
 
 function openAddPlayerModal() {
-  if (players.length >= 20) {
-    alert('Maximum 20 players reached.');
+  if (players.length >= 30) {
+    alert('Maximum 30 players reached.');
     return;
   }
   modalTitle.textContent = 'Add player';
@@ -531,35 +530,6 @@ function showCertificate(player) {
     </div></body></html>`);
   printWindow.document.close();
 }
-
-/* ---------- Logo ---------- */
-const logoBtn = document.getElementById('logoBtn');
-const logoInput = document.getElementById('logoInput');
-const logoImg = document.getElementById('logoImg');
-const logoPlaceholder = document.getElementById('logoPlaceholder');
-
-function applyLogo(data) {
-  logoImg.src = data;
-  logoImg.hidden = false;
-  logoPlaceholder.hidden = true;
-}
-
-if (logoData) {
-  applyLogo(logoData);
-}
-
-logoBtn.onclick = () => logoInput.click();
-logoInput.onchange = () => {
-  const file = logoInput.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    logoData = reader.result;
-    localStorage.setItem('cq_logo', JSON.stringify(logoData));
-    applyLogo(logoData);
-  };
-  reader.readAsDataURL(file);
-};
 
 /* ---------- Dark Mode ---------- */
 const darkModeToggle = document.getElementById('darkModeToggle');
