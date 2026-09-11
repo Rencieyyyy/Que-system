@@ -476,7 +476,7 @@
       border: 1px solid rgba(205, 127, 50, 0.5);
     }
 
-    /* Name + wins polish */
+    /* Name + wins polish (light mode) */
     #top3List .name {
       font-size: 1.05rem;
       font-weight: 700;
@@ -504,6 +504,32 @@
     #top3List .list-row.top3:has(.rank-badge.r3) .wins {
       background: rgba(205, 127, 50, 0.28);
       color: #7a4620;
+    }
+
+    /* ---- Dark mode overrides: brighter text/badges so they're readable ---- */
+    body.dark-mode #top3List .list-row.top3:has(.rank-badge.r1) .name { color: #ffd558; }
+    body.dark-mode #top3List .list-row.top3:has(.rank-badge.r2) .name { color: #e6e6e6; }
+    body.dark-mode #top3List .list-row.top3:has(.rank-badge.r3) .name { color: #ffb066; }
+
+    body.dark-mode #top3List .list-row.top3:has(.rank-badge.r1) .wins {
+      background: rgba(255, 215, 0, 0.22);
+      color: #ffe08a;
+    }
+    body.dark-mode #top3List .list-row.top3:has(.rank-badge.r2) .wins {
+      background: rgba(255, 255, 255, 0.16);
+      color: #f0f0f0;
+    }
+    body.dark-mode #top3List .list-row.top3:has(.rank-badge.r3) .wins {
+      background: rgba(255, 165, 90, 0.22);
+      color: #ffcda0;
+    }
+
+    /* rank-2 (silver) wins badge with 0 wins was blending into the pill -
+       make sure text always has contrast even at 0 wins */
+    #top3List .wins {
+      display: inline-block;
+      min-width: 24px;
+      text-align: center;
     }
 
     /* Shine sweep on #1 only */
