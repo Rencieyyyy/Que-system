@@ -307,6 +307,13 @@ body {
   margin-bottom: 8px;
 }
 
+/* Court Card container — now holds one card per court, stacked */
+#courtCard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 /* Court Card */
 .court-card {
   background: var(--primary-light);
@@ -536,20 +543,6 @@ body.dark-mode .btn-secondary {
   border-radius: 10px;
   padding: 8px 12px;
   min-width: 0;
-}
-
-.mini-player .mini-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  font-weight: 700;
-  flex-shrink: 0;
 }
 
 .mini-player .mini-name {

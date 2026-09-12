@@ -72,10 +72,8 @@ function formTeamsStable(ids) {
 /* Small player chip used in NEXT UP / LATER */
 function miniPlayerBox(id) {
   const p = playerById(id) || { name: '—' };
-  const initial = (p.name || '?').charAt(0).toUpperCase();
   return `
     <div class="mini-player">
-      <div class="mini-avatar">${escapeHtml(initial)}</div>
       <div class="mini-name">${escapeHtml(p.name)}</div>
     </div>`;
 }
@@ -83,10 +81,23 @@ function miniPlayerBox(id) {
 /* ---------- State ---------- */
 let players = [];
 let queue = [];
-let court = null;
+let courts = [null, null]; // courts[0] = Court 1, courts[1] = Court 2
 let history = [];
-let currentStartTime = null;
-let lastCourtKey = null;
+let courtStartTimes = [null, null];
+let lastCourtsKey = null;
+
+/* Load courts data, migrating from the old single-court format if needed */
+function loadCourts() {
+  const stored = load('cq_courts', null);
+  if (Array.isArray(stored)) {
+    // Make sure there are always exactly 2 slots
+    const result = [stored[0] || null, stored[1] || null];
+    return result;
+  }
+  // Legacy fallback: single court used to be stored under cq_court
+  const legacy = load('cq_court', null);
+  return [legacy || null, null];
+}
 
 /* ---------- Logo (same as admin) ---------- */
 const logoImg = document.getElementById('logoImg');
@@ -106,7 +117,7 @@ if (logoData) {
 } else {
   // fallback try
   try {
-    logoImg.src = 'abclogo.jfif';
+    logoImg.src = 'abclogo.jpg';
     logoImg.hidden = false;
     logoPlaceholder.hidden = true;
   } catch (e) {}
@@ -136,9 +147,8 @@ themeToggle.onclick = () => {
 };
 
 /* ---------- Render ---------- */
-function getCourtKey(c) {
-  if (!c) return 'empty';
-  return [...c.teamA, ...c.teamB].join('-') + '|' + c.start;
+function getCourtsKey(cs) {
+  return cs.map(c => c ? [...c.teamA, ...c.teamB].join('-') + '|' + c.start : 'empty').join('~');
 }
 
 function renderCourt() {
@@ -146,58 +156,57 @@ function renderCourt() {
   const liveDot = document.getElementById('liveDot');
   const panel = document.getElementById('inPlayPanel');
 
-  const key = getCourtKey(court);
+  const key = getCourtsKey(courts);
 
-  // Only rebuild when players actually change (keeps timer smooth)
-  if (key === lastCourtKey) return;
-  lastCourtKey = key;
+  // Only rebuild when the courts actually change (keeps timers smooth)
+  if (key === lastCourtsKey) return;
+  lastCourtsKey = key;
 
-  if (!court) {
-    liveDot.classList.remove('live');
-    panel.classList.remove('live-panel');
-    currentStartTime = null;
-    card.innerHTML = `
-      <div class="empty-msg">
-        Court is free<br>
-        <small style="opacity:0.7">Waiting for the next game...</small>
+  const anyLive = courts.some(Boolean);
+  liveDot.classList.toggle('live', anyLive);
+  panel.classList.toggle('live-panel', anyLive);
+
+  courtStartTimes = courts.map(c => (c ? c.start : null));
+
+  card.innerHTML = courts.map((court, i) => {
+    const courtNum = i + 1;
+
+    if (!court) {
+      return `
+        <div class="court-block">
+          <div class="court-label">Court ${courtNum}</div>
+          <div class="empty-msg" style="padding:14px 8px;">
+            Court is free<br><small style="opacity:0.7">Waiting for the next game...</small>
+          </div>
+        </div>`;
+    }
+
+    const p1 = playerById(court.teamA[0]);
+    const p2 = playerById(court.teamA[1]);
+    const p3 = playerById(court.teamB[0]);
+    const p4 = playerById(court.teamB[1]);
+
+    return `
+      <div class="court-block">
+        <div class="court-label">Court ${courtNum}</div>
+        <div class="court-timer" id="courtTimer-${i}">00:00</div>
+        <div class="players-grid">
+          <div class="player-box">
+            <div>${escapeHtml(p1?.name || '—')}</div>
+          </div>
+          <div class="player-box">
+            <div>${escapeHtml(p3?.name || '—')}</div>
+          </div>
+          <div class="player-box">
+            <div>${escapeHtml(p2?.name || '—')}</div>
+          </div>
+          <div class="player-box">
+            <div>${escapeHtml(p4?.name || '—')}</div>
+          </div>
+          <div class="vs-badge">VS</div>
+        </div>
       </div>`;
-    return;
-  }
-
-  liveDot.classList.add('live');
-  panel.classList.add('live-panel');
-  currentStartTime = court.start;
-
-  const p1 = playerById(court.teamA[0]);
-  const p2 = playerById(court.teamA[1]);
-  const p3 = playerById(court.teamB[0]);
-  const p4 = playerById(court.teamB[1]);
-
-  card.innerHTML = `
-    <div style="text-align:center;">
-      <div class="court-label">Court 1</div>
-      <div class="court-timer" id="courtTimer">00:00</div>
-
-      <div class="players-grid">
-        <div class="player-box">
-          <div class="avatar">${(p1?.name || '?').charAt(0).toUpperCase()}</div>
-          <div>${escapeHtml(p1?.name || '—')}</div>
-        </div>
-        <div class="player-box">
-          <div class="avatar">${(p3?.name || '?').charAt(0).toUpperCase()}</div>
-          <div>${escapeHtml(p3?.name || '—')}</div>
-        </div>
-        <div class="player-box">
-          <div class="avatar">${(p2?.name || '?').charAt(0).toUpperCase()}</div>
-          <div>${escapeHtml(p2?.name || '—')}</div>
-        </div>
-        <div class="player-box">
-          <div class="avatar">${(p4?.name || '?').charAt(0).toUpperCase()}</div>
-          <div>${escapeHtml(p4?.name || '—')}</div>
-        </div>
-        <div class="vs-badge">VS</div>
-      </div>
-    </div>`;
+  }).join('');
 }
 
 /* Build the markup for one queued game: each player gets their own mini box */
@@ -278,7 +287,7 @@ function renderTop3() {
 function render() {
   players = load('cq_players', []);
   queue   = load('cq_queue', []);
-  court   = load('cq_court', null);
+  courts  = loadCourts();
   history = load('cq_history', []);
 
   // Also refresh logo in case admin changed it
@@ -302,13 +311,15 @@ setInterval(() => {
     });
   }
 
-  // Game timer – only updates the number
-  if (currentStartTime) {
-    const timerEl = document.getElementById('courtTimer');
-    if (timerEl) {
-      timerEl.textContent = fmtClock(Date.now() - currentStartTime);
+  // Game timers – only update the numbers, one per court
+  courtStartTimes.forEach((start, i) => {
+    if (start) {
+      const timerEl = document.getElementById('courtTimer-' + i);
+      if (timerEl) {
+        timerEl.textContent = fmtClock(Date.now() - start);
+      }
     }
-  }
+  });
 }, 1000);
 
 /* ---------- Data refresh ---------- */

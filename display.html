@@ -185,6 +185,19 @@
       display: flex;
       flex-direction: column;
       justify-content: center;
+      gap: 18px;
+    }
+
+    /* One block per court. When there's more than one, a divider line
+       separates them so it's clear each is its own court. */
+    .court-block {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .court-block + .court-block {
+      padding-top: 18px;
+      border-top: 1px dashed var(--border);
     }
 
     .court-label {
@@ -192,10 +205,13 @@
       color: var(--text-muted);
       margin-bottom: 2px;
       letter-spacing: 0.3px;
+      font-weight: 700;
+      text-align: center;
     }
 
+    /* Timer made a bit smaller than before (was 3.1rem) */
     .court-timer {
-      font-size: 3.1rem;
+      font-size: 2.3rem;
       font-weight: 800;
       letter-spacing: 3px;
       color: var(--primary-dark);
@@ -218,14 +234,14 @@
       padding: 14px 10px;
       text-align: center;
       font-weight: 700;
-      font-size: 1.12rem;
+      /* Name-only boxes: made a bit bigger since the avatar is gone */
+      font-size: 1.32rem;
       color: var(--text);
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 7px;
-      min-height: 88px;
       justify-content: center;
+      min-height: 88px;
       border: 1px solid rgba(90, 196, 173, 0.25);
       transition: transform 0.2s;
     }
@@ -234,18 +250,10 @@
       transform: scale(1.02);
     }
 
+    /* Initials/avatar circle removed from the main IN PLAY player boxes —
+       only the player name is shown now */
     .player-box .avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #5ac4ad, #3da892);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.05rem;
-      font-weight: 700;
-      box-shadow: 0 3px 10px rgba(76, 184, 163, 0.4);
+      display: none;
     }
 
     .vs-badge {
@@ -343,22 +351,14 @@
       min-width: 0;
     }
 
+    /* Initials/avatar circle removed from NEXT UP / LATER mini boxes too —
+       only the player name is shown */
     .mini-player .mini-avatar {
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #5ac4ad, #3da892);
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.72rem;
-      font-weight: 700;
-      flex-shrink: 0;
+      display: none;
     }
 
     .mini-player .mini-name {
-      font-size: 0.88rem;
+      font-size: 0.98rem;
       font-weight: 700;
       color: var(--text);
       white-space: nowrap;
@@ -563,7 +563,7 @@
         grid-template-columns: 1fr;
       }
       .court-timer {
-        font-size: 2.4rem;
+        font-size: 2.1rem;
       }
       #inPlayPanel {
         height: auto;
@@ -584,7 +584,7 @@
       </div>
       <div>
         <h1>ABCDink Pickleyard</h1>
-        <p>Live Court Display</p>
+        <p>Live Courts Display</p>
       </div>
     </div>
     <div class="top-nav-right">

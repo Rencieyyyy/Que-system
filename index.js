@@ -1,7 +1,7 @@
 /* ---------- State ---------- */
 let players   = load('cq_players', []);
 let queue     = load('cq_queue', []);
-let court     = load('cq_court', null);
+let courts    = loadCourts();          // [Court 1, Court 2] — each is null or {teamA, teamB, start}
 let history   = load('cq_history', []);
 let gameTimes = load('cq_gameTimes', []);
 
@@ -12,17 +12,31 @@ function load(key, fallback) {
   } catch (e) { return fallback; }
 }
 
+/* Load the 2-court array, migrating old single-court saves (cq_court) if found */
+function loadCourts() {
+  const stored = load('cq_courts', null);
+  if (Array.isArray(stored)) {
+    return [stored[0] || null, stored[1] || null];
+  }
+  const legacy = load('cq_court', null);
+  return [legacy || null, null];
+}
+
 function save() {
   localStorage.setItem('cq_players', JSON.stringify(players));
   localStorage.setItem('cq_queue', JSON.stringify(queue));
-  localStorage.setItem('cq_court', JSON.stringify(court));
+  localStorage.setItem('cq_courts', JSON.stringify(courts));
   localStorage.setItem('cq_history', JSON.stringify(history));
   localStorage.setItem('cq_gameTimes', JSON.stringify(gameTimes));
+  localStorage.removeItem('cq_court'); // legacy key no longer used
 }
 
 function uid() { return 'p' + Math.random().toString(36).slice(2, 9); }
 function playerById(id) { return players.find(p => p.id === id); }
 function pairKey(a, b) { return [a, b].sort().join('_'); }
+function isPlayerOnAnyCourt(id) {
+  return courts.some(c => c && (c.teamA.includes(id) || c.teamB.includes(id)));
+}
 
 /* ---------- Smart team formation ---------- */
 function formTeams(ids) {
@@ -70,7 +84,7 @@ function addPlayer(name) {
 }
 
 function removePlayer(id) {
-  if (court && (court.teamA.includes(id) || court.teamB.includes(id))) {
+  if (isPlayerOnAnyCourt(id)) {
     alert("This player is currently on court.\nEnd the game first, then remove them.");
     return;
   }
@@ -81,7 +95,69 @@ function removePlayer(id) {
   render();
 }
 
-function endGame(winner) {
+/* Start a game on a specific court index (0 = Court 1, 1 = Court 2) */
+function startGame(courtIndex) {
+  if (courts[courtIndex]) {
+    alert(`Court ${courtIndex + 1} already has a game in play.`);
+    return;
+  }
+  if (queue.length < 4) {
+    alert('Need at least 4 players in the queue to start a game.');
+    return;
+  }
+  const ids = queue.slice(0, 4);
+  queue = queue.slice(4);
+  const teams = formTeams(ids);
+  history.push(pairKey(teams.teamA[0], teams.teamA[1]));
+  history.push(pairKey(teams.teamB[0], teams.teamB[1]));
+  courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
+  save();
+  render();
+  closeModal();
+}
+
+/* Decide whether to ask which court, auto-pick the only free one, or block */
+function openStartGameModal() {
+  if (queue.length < 4) {
+    alert('Need at least 4 players in the queue to start a game.');
+    return;
+  }
+
+  const freeIndexes = courts.map((c, i) => (c ? -1 : i)).filter(i => i !== -1);
+
+  if (freeIndexes.length === 0) {
+    alert('Both courts are currently in play. End a game first.');
+    return;
+  }
+
+  if (freeIndexes.length === 1) {
+    // Only one court is free — just start on it, no need to ask
+    startGame(freeIndexes[0]);
+    return;
+  }
+
+  // Both courts free — let the admin pick
+  modalTitle.textContent = 'Choose a court';
+  modalBody.innerHTML = `
+    <p style="margin:-4px 0 16px;color:var(--text-muted);font-size:0.9rem;">
+      Which court should the next game start on?
+    </p>
+    ${courts.map((c, i) => `
+      <button class="win-option" data-startcourt="${i}">
+        <span class="wl">AVAILABLE</span>
+        <span>Court ${i + 1}</span>
+      </button>`).join('')}
+    <button class="btn btn-secondary" id="cancelStart" style="width:100%;margin-top:8px">Cancel</button>`;
+  overlay.classList.remove('hidden');
+
+  modalBody.querySelectorAll('[data-startcourt]').forEach(btn => {
+    btn.onclick = () => startGame(parseInt(btn.getAttribute('data-startcourt'), 10));
+  });
+  document.getElementById('cancelStart').onclick = closeModal;
+}
+
+function endGame(winner, courtIndex) {
+  const court = courts[courtIndex];
   if (!court) return;
 
   const winners = winner === 'A' ? court.teamA : court.teamB;
@@ -108,15 +184,16 @@ function endGame(winner) {
   insertAt(q, Math.min(skipForLosers + winners.length, q.length), losers);
 
   queue = q;
-  court = null;
+  courts[courtIndex] = null;
 
+  // Auto-start the next game on the court that just freed up, if enough players are waiting
   if (queue.length >= 4) {
     const nextIds = queue.slice(0, 4);
     queue = queue.slice(4);
     const teams = formTeams(nextIds);
     history.push(pairKey(teams.teamA[0], teams.teamA[1]));
     history.push(pairKey(teams.teamB[0], teams.teamB[1]));
-    court = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
+    courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
   }
 
   save();
@@ -128,28 +205,9 @@ function resetAll() {
   if (!confirm('This clears all players, the queue, and the leaderboard. Continue?')) return;
   players = [];
   queue = [];
-  court = null;
+  courts = [null, null];
   history = [];
   gameTimes = [];
-  save();
-  render();
-}
-
-function startGame() {
-  if (court) {
-    alert('There is already a game in play. End it first.');
-    return;
-  }
-  if (queue.length < 4) {
-    alert('Need at least 4 players in the queue to start a game.');
-    return;
-  }
-  const ids = queue.slice(0, 4);
-  queue = queue.slice(4);
-  const teams = formTeams(ids);
-  history.push(pairKey(teams.teamA[0], teams.teamA[1]));
-  history.push(pairKey(teams.teamB[0], teams.teamB[1]));
-  court = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
   save();
   render();
 }
@@ -203,46 +261,55 @@ function escapeHtml(str) {
 
 function renderCourt() {
   const liveDot = document.getElementById('liveDot');
-  if (!court) {
-    els.liveCount.textContent = '0 live';
-    if (liveDot) liveDot.classList.remove('live');
-    els.courtCard.innerHTML = `
+  const liveCountNum = courts.filter(Boolean).length;
+
+  els.liveCount.textContent = `${liveCountNum} live`;
+  if (liveDot) liveDot.classList.toggle('live', liveCountNum > 0);
+
+  els.courtCard.innerHTML = courts.map((court, i) => {
+    const courtNum = i + 1;
+
+    if (!court) {
+      return `
+        <div class="court-card court-card-empty">
+          <div class="court-top">
+            <span class="court-name">Court ${courtNum}</span>
+          </div>
+          <div class="court-empty">
+            <p>Court is free. ${queue.length < 4
+              ? `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`
+              : 'Ready to start the next game.'}</p>
+          </div>
+        </div>`;
+    }
+
+    return `
       <div class="court-card">
-        <div class="court-empty">
-          <p>Court is free. ${queue.length < 4
-            ? `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`
-            : 'Ready to start the next game.'}</p>
+        <div class="court-top">
+          <span class="court-name">Court ${courtNum}</span>
+          <span class="pill-live">Live</span>
         </div>
+        <div class="court-timer" id="courtTimer-${i}">00:00</div>
+        <div class="matchup">
+          <div class="team">
+            <i class="fas fa-users"></i>
+            <span>${teamName(court.teamA)}</span>
+          </div>
+          <div class="vs">VS</div>
+          <div class="team">
+            <i class="fas fa-users"></i>
+            <span>${teamName(court.teamB)}</span>
+          </div>
+        </div>
+        <button class="btn-end" data-endcourt="${i}">
+          <i class="fas fa-flag-checkered"></i> End Game
+        </button>
       </div>`;
-    return;
-  }
+  }).join('');
 
-  els.liveCount.textContent = '1 live';
-  if (liveDot) liveDot.classList.add('live');
-
-  els.courtCard.innerHTML = `
-    <div class="court-card">
-      <div class="court-top">
-        <span class="court-name">Court 1</span>
-        <span class="pill-live">Live</span>
-      </div>
-      <div class="court-timer" id="courtTimer">00:00</div>
-      <div class="matchup">
-        <div class="team">
-          <i class="fas fa-users"></i>
-          <span>${teamName(court.teamA)}</span>
-        </div>
-        <div class="vs">VS</div>
-        <div class="team">
-          <i class="fas fa-users"></i>
-          <span>${teamName(court.teamB)}</span>
-        </div>
-      </div>
-      <button class="btn-end" id="endGameBtn">
-        <i class="fas fa-flag-checkered"></i> End Game
-      </button>
-    </div>`;
-  document.getElementById('endGameBtn').onclick = openEndGameModal;
+  els.courtCard.querySelectorAll('[data-endcourt]').forEach(btn => {
+    btn.onclick = () => openEndGameModal(parseInt(btn.getAttribute('data-endcourt'), 10));
+  });
 }
 
 function leaderRow(p, i, top3) {
@@ -386,10 +453,12 @@ function render() {
 
 /* ---------- Live timer / clock ---------- */
 setInterval(() => {
-  if (court) {
-    const el = document.getElementById('courtTimer');
-    if (el) el.textContent = fmtClock(Date.now() - court.start);
-  }
+  courts.forEach((court, i) => {
+    if (court) {
+      const el = document.getElementById('courtTimer-' + i);
+      if (el) el.textContent = fmtClock(Date.now() - court.start);
+    }
+  });
   const now = new Date();
   els.clockTime.textContent = now.toLocaleTimeString([], {
     hour: '2-digit', minute: '2-digit', second: '2-digit'
@@ -452,9 +521,10 @@ function openAddPlayerModal() {
   document.getElementById('cancelAdd').onclick = closeModal;
 }
 
-function openEndGameModal() {
+function openEndGameModal(courtIndex) {
+  const court = courts[courtIndex];
   if (!court) return;
-  modalTitle.textContent = 'Who won?';
+  modalTitle.textContent = `Court ${courtIndex + 1} — Who won?`;
   modalBody.innerHTML = `
     <button class="win-option" data-winner="A">
       <span class="wl">WINNER</span>
@@ -468,7 +538,7 @@ function openEndGameModal() {
   overlay.classList.remove('hidden');
 
   modalBody.querySelectorAll('[data-winner]').forEach(btn => {
-    btn.onclick = () => endGame(btn.getAttribute('data-winner'));
+    btn.onclick = () => endGame(btn.getAttribute('data-winner'), courtIndex);
   });
   document.getElementById('cancelEnd').onclick = closeModal;
 }
@@ -481,7 +551,7 @@ document.getElementById('resetAll').onclick = (e) => {
 };
 document.getElementById('startGameBtn').onclick = (e) => {
   e.preventDefault();
-  startGame();
+  openStartGameModal();
 };
 
 /* ---------- Certificate ---------- */
