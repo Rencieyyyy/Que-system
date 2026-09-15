@@ -22,6 +22,40 @@ function loadCourts() {
   return [legacy || null, null];
 }
 
+/* Make sure every player has a `skip` counter (games left to rest before
+   they're eligible again). Old saved data won't have this field. */
+function normalizePlayers() {
+  players.forEach(p => {
+    if (typeof p.skip !== 'number' || isNaN(p.skip)) p.skip = 0;
+  });
+}
+normalizePlayers();
+syncQueueWithPlayers();
+
+/* Guarantee invariant: every player who exists and isn't currently on a
+   court is somewhere in the queue. This is what actually guarantees "every
+   player I add can play" — it doesn't rely on every code path remembering
+   to queue people; it's checked and repaired every render. */
+function syncQueueWithPlayers() {
+  const onCourtIds = new Set();
+  courts.forEach(c => {
+    if (c) {
+      c.teamA.forEach(id => onCourtIds.add(id));
+      c.teamB.forEach(id => onCourtIds.add(id));
+    }
+  });
+
+  // Drop queue entries for players that no longer exist (e.g. after removePlayer)
+  queue = queue.filter(id => playerById(id));
+
+  // Anyone not on court and missing from the queue gets appended to the back
+  players.forEach(p => {
+    if (!onCourtIds.has(p.id) && !queue.includes(p.id)) {
+      queue.push(p.id);
+    }
+  });
+}
+
 function save() {
   localStorage.setItem('cq_players', JSON.stringify(players));
   localStorage.setItem('cq_queue', JSON.stringify(queue));
@@ -38,7 +72,7 @@ function isPlayerOnAnyCourt(id) {
   return courts.some(c => c && (c.teamA.includes(id) || c.teamB.includes(id)));
 }
 
-/* ---------- Smart team formation ---------- */
+/* ---------- Smart team formation (avoid repeat teammates) ---------- */
 function formTeams(ids) {
   const [a, b, c, d] = ids;
   const options = [
@@ -66,6 +100,47 @@ function formTeams(ids) {
   return best[Math.floor(Math.random() * best.length)];
 }
 
+/* ---------- Fair rotation helpers ---------- */
+
+/* Look through the queue, in order, and collect the first 4 players who
+   are NOT resting (skip === 0). Players who are resting stay in place in
+   the queue — they're just skipped over when picking, never removed or
+   pushed to the back out of turn. Returns null if fewer than 4 are ready. */
+function pickNextFour(fromQueue) {
+  const q = fromQueue || queue;
+  const ids = [];
+  for (const id of q) {
+    const p = playerById(id);
+    if (p && p.skip === 0) {
+      ids.push(id);
+      if (ids.length === 4) break;
+    }
+  }
+  return ids.length === 4 ? ids : null;
+}
+
+/* Every time a game starts (on either court), every resting player's
+   wait ticks down by one "game". This is what makes "rest 1 game" /
+   "rest 2 games" concrete instead of a queue-position hack. */
+function tickRestCounters() {
+  queue.forEach(id => {
+    const p = playerById(id);
+    if (p && p.skip > 0) p.skip -= 1;
+  });
+}
+
+/* Non-destructive preview of upcoming eligible groups, used by the
+   "Next / Later" panel so it never shows resting players as about to play. */
+function nextEligibleGroups(maxGroups = 2) {
+  const eligible = queue.filter(id => {
+    const p = playerById(id);
+    return p && p.skip === 0;
+  });
+  const groups = [];
+  for (let i = 0; i < eligible.length; i += 4) groups.push(eligible.slice(i, i + 4));
+  return groups.slice(0, maxGroups);
+}
+
 /* ---------- Actions ---------- */
 function addPlayer(name) {
   name = name.trim();
@@ -76,9 +151,9 @@ function addPlayer(name) {
     return;
   }
 
-  const p = { id: uid(), name, wins: 0 };
+  const p = { id: uid(), name, wins: 0, skip: 0 };
   players.push(p);
-  queue.push(p.id);
+  queue.push(p.id); // new players always join at the back — fair line
   save();
   render();
 }
@@ -101,16 +176,22 @@ function startGame(courtIndex) {
     alert(`Court ${courtIndex + 1} already has a game in play.`);
     return;
   }
-  if (queue.length < 4) {
-    alert('Need at least 4 players in the queue to start a game.');
+
+  const ids = pickNextFour();
+  if (!ids) {
+    alert('Need at least 4 players who are not resting to start a game.');
     return;
   }
-  const ids = queue.slice(0, 4);
-  queue = queue.slice(4);
+
+  queue = queue.filter(id => !ids.includes(id));
+
   const teams = formTeams(ids);
   history.push(pairKey(teams.teamA[0], teams.teamA[1]));
   history.push(pairKey(teams.teamB[0], teams.teamB[1]));
   courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
+
+  tickRestCounters();
+
   save();
   render();
   closeModal();
@@ -118,8 +199,8 @@ function startGame(courtIndex) {
 
 /* Decide whether to ask which court, auto-pick the only free one, or block */
 function openStartGameModal() {
-  if (queue.length < 4) {
-    alert('Need at least 4 players in the queue to start a game.');
+  if (!pickNextFour()) {
+    alert('Need at least 4 players who are not resting to start a game.');
     return;
   }
 
@@ -163,38 +244,38 @@ function endGame(winner, courtIndex) {
   const winners = winner === 'A' ? court.teamA : court.teamB;
   const losers  = winner === 'A' ? court.teamB : court.teamA;
 
+  // Winners rest 1 game, losers rest 2 games, before being eligible again
   winners.forEach(id => {
     const p = playerById(id);
-    if (p) p.wins += 1;
+    if (p) { p.wins += 1; p.skip = 1; }
+  });
+  losers.forEach(id => {
+    const p = playerById(id);
+    if (p) { p.skip = 2; }
   });
 
   gameTimes.push(Date.now() - court.start);
   if (gameTimes.length > 20) gameTimes = gameTimes.slice(-20);
 
-  const q = [...queue];
-  const skipForWinners = 4;
-  const skipForLosers = 8;
+  // Everyone who just finished goes to the BACK of the queue — true FIFO,
+  // so no one can cut ahead of players who've been waiting longer.
+  queue.push(...winners, ...losers);
 
-  const insertAt = (arr, index, items) => {
-    const i = Math.min(Math.max(0, index), arr.length);
-    arr.splice(i, 0, ...items);
-  };
-
-  insertAt(q, Math.min(skipForWinners, q.length), winners);
-  insertAt(q, Math.min(skipForLosers + winners.length, q.length), losers);
-
-  queue = q;
   courts[courtIndex] = null;
 
-  // Auto-start the next game on the court that just freed up, if enough players are waiting
-  if (queue.length >= 4) {
-    const nextIds = queue.slice(0, 4);
-    queue = queue.slice(4);
+  // Auto-start the next game on the court that just freed up, if 4
+  // non-resting players are available.
+  const nextIds = pickNextFour();
+  if (nextIds) {
+    queue = queue.filter(id => !nextIds.includes(id));
     const teams = formTeams(nextIds);
     history.push(pairKey(teams.teamA[0], teams.teamA[1]));
     history.push(pairKey(teams.teamB[0], teams.teamB[1]));
     courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
   }
+
+  // A game started (or attempted) — tick everyone's rest counter down
+  tickRestCounters();
 
   save();
   render();
@@ -215,7 +296,7 @@ function resetAll() {
 function replacePlayer(oldId, newName) {
   if (!newName) return;
   const oldIndex = players.findIndex(p => p.id === oldId);
-  const newP = { id: uid(), name: newName, wins: 0 };
+  const newP = { id: uid(), name: newName, wins: 0, skip: 0 };
   if (oldIndex !== -1) {
     players.splice(oldIndex, 1, newP);
   } else {
@@ -270,14 +351,18 @@ function renderCourt() {
     const courtNum = i + 1;
 
     if (!court) {
+      const eligibleWaiting = queue.filter(id => {
+        const p = playerById(id);
+        return p && p.skip === 0;
+      }).length;
       return `
         <div class="court-card court-card-empty">
           <div class="court-top">
             <span class="court-name">Court ${courtNum}</span>
           </div>
           <div class="court-empty">
-            <p>Court is free. ${queue.length < 4
-              ? `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`
+            <p>Court is free. ${eligibleWaiting < 4
+              ? `Waiting on ${4 - eligibleWaiting} more ready player${4 - eligibleWaiting === 1 ? '' : 's'} to start a game.`
               : 'Ready to start the next game.'}</p>
           </div>
         </div>`;
@@ -360,6 +445,11 @@ function attachCertificateHandlers() {
 }
 
 function renderQueue() {
+  const eligibleCount = queue.filter(id => {
+    const p = playerById(id);
+    return p && p.skip === 0;
+  }).length;
+
   els.statWaiting.textContent = queue.length;
   els.navQueueCount.textContent = queue.length;
   els.capacityCount.textContent = players.length;
@@ -370,29 +460,57 @@ function renderQueue() {
     return;
   }
 
+  // Group by eligible players only, so groups always represent real
+  // "who plays next" batches. Resting players are listed separately below.
+  const eligibleIds = queue.filter(id => {
+    const p = playerById(id);
+    return p && p.skip === 0;
+  });
+  const restingIds = queue.filter(id => {
+    const p = playerById(id);
+    return p && p.skip > 0;
+  });
+
   const groups = [];
-  for (let i = 0; i < queue.length; i += 4) {
-    groups.push(queue.slice(i, i + 4));
+  for (let i = 0; i < eligibleIds.length; i += 4) {
+    groups.push(eligibleIds.slice(i, i + 4));
   }
 
-  els.queueList.innerHTML = `<div class="list-card">${
-    groups.map((g, gi) => `
-      <div class="queue-group">
-        <div class="queue-group-head">
-          <span class="queue-group-title">${
-            gi === 0 && g.length === 4 ? 'Up next' : `Group ${gi + 1}`
-          }${g.length < 4 ? ` · needs ${4 - g.length} more` : ''}</span>
-        </div>
-        <div class="queue-players">
-          ${g.map(id => {
-            const p = playerById(id);
-            return `<span class="player-chip">${escapeHtml(p ? p.name : '—')}
-              <button data-replace="${id}" title="Replace">↻</button>
-              <button data-remove="${id}" title="Remove">&times;</button></span>`;
-          }).join('')}
-        </div>
-      </div>`).join('')
-  }</div>`;
+  const groupsHtml = groups.map((g, gi) => `
+    <div class="queue-group">
+      <div class="queue-group-head">
+        <span class="queue-group-title">${
+          gi === 0 && g.length === 4 ? 'Up next' : `Group ${gi + 1}`
+        }${g.length < 4 ? ` · needs ${4 - g.length} more` : ''}</span>
+      </div>
+      <div class="queue-players">
+        ${g.map(id => {
+          const p = playerById(id);
+          return `<span class="player-chip">${escapeHtml(p ? p.name : '—')}
+            <button data-replace="${id}" title="Replace">↻</button>
+            <button data-remove="${id}" title="Remove">&times;</button></span>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+
+  const restingHtml = restingIds.length ? `
+    <div class="queue-group">
+      <div class="queue-group-head">
+        <span class="queue-group-title">Resting</span>
+      </div>
+      <div class="queue-players">
+        ${restingIds.map(id => {
+          const p = playerById(id);
+          if (!p) return '';
+          return `<span class="player-chip" style="opacity:0.6;">${escapeHtml(p.name)}
+            <span style="font-size:0.75em;margin-left:4px;">(${p.skip} game${p.skip === 1 ? '' : 's'} left)</span>
+            <button data-replace="${id}" title="Replace">↻</button>
+            <button data-remove="${id}" title="Remove">&times;</button></span>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
+  els.queueList.innerHTML = `<div class="list-card">${groupsHtml}${restingHtml}</div>`;
 
   els.queueList.querySelectorAll('[data-remove]').forEach(btn => {
     btn.onclick = () => removePlayer(btn.getAttribute('data-remove'));
@@ -420,15 +538,14 @@ function renderNextGames() {
   const el = els.nextGames;
   if (!el) return;
 
-  if (!queue.length) {
+  const groups = nextEligibleGroups(2);
+
+  if (!groups.length) {
     el.innerHTML = `<div class="next-game"><div class="g-title">Next games</div><div class="g-list">No upcoming games</div></div>`;
     return;
   }
 
-  const groups = [];
-  for (let i = 0; i < queue.length; i += 4) groups.push(queue.slice(i, i + 4));
-
-  el.innerHTML = groups.slice(0, 2).map((g, gi) => {
+  el.innerHTML = groups.map((g, gi) => {
     const title = gi === 0 ? 'Next' : 'Later';
     const need = g.length < 4 ? ` · needs ${4 - g.length}` : '';
     if (g.length === 4) {
@@ -443,6 +560,7 @@ function renderNextGames() {
 }
 
 function render() {
+  syncQueueWithPlayers();
   renderCourt();
   renderTop3();
   renderQueue();
