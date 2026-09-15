@@ -901,3 +901,80 @@ body.dark-mode .progress-track {
     margin: 18px 12px 0;
   }
 }
+/* ===== Teammate color-coding (Team 1 = green, Team 2 = black) ===== */
+
+/* IN PLAY — courts (left column = Team 1, right column = Team 2) */
+.players-grid .player-box:nth-child(1),
+.players-grid .player-box:nth-child(3) {
+  border: 2px solid #22c55e;
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.18), rgba(34, 197, 94, 0.05));
+}
+
+.players-grid .player-box:nth-child(1)::after,
+.players-grid .player-box:nth-child(3)::after {
+  content: "TEAM 1";
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #16a34a;
+  margin-top: 4px;
+}
+
+.players-grid .player-box:nth-child(2),
+.players-grid .player-box:nth-child(4) {
+  border: 2px solid #111827;
+  background: linear-gradient(145deg, rgba(17, 24, 39, 0.10), rgba(17, 24, 39, 0.03));
+}
+
+.players-grid .player-box:nth-child(2)::after,
+.players-grid .player-box:nth-child(4)::after {
+  content: "TEAM 2";
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #111827;
+  margin-top: 4px;
+}
+
+/* NEXT UP / LATER — mini-match team groups */
+.mini-match .mini-team:first-child .mini-player {
+  border: 2px solid #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.mini-match .mini-team:last-child .mini-player {
+  border: 2px solid #111827;
+  background: rgba(17, 24, 39, 0.04);
+}
+
+/* Dark mode adjustments */
+body.dark-mode .players-grid .player-box:nth-child(1),
+body.dark-mode .players-grid .player-box:nth-child(3) {
+  border-color: #4ade80;
+  background: linear-gradient(145deg, rgba(74, 222, 128, 0.22), rgba(74, 222, 128, 0.06));
+}
+body.dark-mode .players-grid .player-box:nth-child(1)::after,
+body.dark-mode .players-grid .player-box:nth-child(3)::after {
+  color: #4ade80;
+}
+
+body.dark-mode .players-grid .player-box:nth-child(2),
+body.dark-mode .players-grid .player-box:nth-child(4) {
+  border-color: #e5e7eb;
+  background: linear-gradient(145deg, rgba(229, 231, 235, 0.10), rgba(229, 231, 235, 0.03));
+}
+body.dark-mode .players-grid .player-box:nth-child(2)::after,
+body.dark-mode .players-grid .player-box:nth-child(4)::after {
+  color: #e5e7eb;
+}
+
+body.dark-mode .mini-match .mini-team:first-child .mini-player {
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+body.dark-mode .mini-match .mini-team:last-child .mini-player {
+  border-color: #e5e7eb;
+  background: rgba(229, 231, 235, 0.06);
+}
