@@ -97,7 +97,42 @@ function formTeams(ids) {
     }
   });
 
-  return best[Math.floor(Math.random() * best.length)];
+  // Deterministic tie-break (NOT random): if multiple pairing options are
+  // equally good, always take the first one in a fixed, stable order. This
+  // is what makes the admin page and the live display page — two separate
+  // scripts with no shared runtime state — always compute the exact same
+  // preview pairing from the same 4 ids + history, instead of each rolling
+  // its own random choice and sometimes disagreeing.
+  return best[0];
+}
+
+/* Cache the pairing for a given group of 4 players so it's computed once
+   and reused everywhere — this is what keeps "Next"/"Later" previews
+   consistent with the teams that actually get put on the court, instead
+   of formTeams() re-rolling a different pairing each time it's called.
+   The key includes history.length so the cache automatically invalidates
+   whenever a new result changes what the "best" pairing should be —
+   otherwise a group previewed early (before history disambiguated it)
+   would keep showing a stale pairing forever, even after later games
+   made a different pairing the correct one. */
+let teamsCache = {};
+
+function teamsCacheKey(ids) {
+  return [...ids].sort().join('_') + '|' + history.length;
+}
+
+function formTeamsStable(ids) {
+  const key = teamsCacheKey(ids);
+  if (teamsCache[key]) return teamsCache[key];
+  const teams = formTeams(ids);
+  teamsCache[key] = teams;
+  return teams;
+}
+
+/* Call this once a group's pairing has actually been used to start a game,
+   so the cache doesn't hold onto stale entries forever. */
+function clearTeamsCacheFor(ids) {
+  delete teamsCache[teamsCacheKey(ids)];
 }
 
 /* ---------- Fair rotation helpers ---------- */
@@ -185,7 +220,8 @@ function startGame(courtIndex) {
 
   queue = queue.filter(id => !ids.includes(id));
 
-  const teams = formTeams(ids);
+  const teams = formTeamsStable(ids);
+  clearTeamsCacheFor(ids);
   history.push(pairKey(teams.teamA[0], teams.teamA[1]));
   history.push(pairKey(teams.teamB[0], teams.teamB[1]));
   courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
@@ -268,7 +304,8 @@ function endGame(winner, courtIndex) {
   const nextIds = pickNextFour();
   if (nextIds) {
     queue = queue.filter(id => !nextIds.includes(id));
-    const teams = formTeams(nextIds);
+    const teams = formTeamsStable(nextIds);
+    clearTeamsCacheFor(nextIds);
     history.push(pairKey(teams.teamA[0], teams.teamA[1]));
     history.push(pairKey(teams.teamB[0], teams.teamB[1]));
     courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
@@ -549,7 +586,7 @@ function renderNextGames() {
     const title = gi === 0 ? 'Next' : 'Later';
     const need = g.length < 4 ? ` · needs ${4 - g.length}` : '';
     if (g.length === 4) {
-      const teams = formTeams(g);
+      const teams = formTeamsStable(g);
       const a = teams.teamA.map(id => (playerById(id) || { name: '—' }).name).join(' & ');
       const b = teams.teamB.map(id => (playerById(id) || { name: '—' }).name).join(' & ');
       return `<div class="next-game"><div class="g-title">${title}${need}</div><div class="g-list">${escapeHtml(a)} vs ${escapeHtml(b)}</div></div>`;

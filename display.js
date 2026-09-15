@@ -39,7 +39,10 @@ function formTeams(ids) {
       best.push(opt);
     }
   });
-  return best[Math.floor(Math.random() * best.length)];
+  // Deterministic tie-break (NOT random) — must match admin.js exactly so
+  // this page's preview pairing always agrees with the admin page's,
+  // since they're separate scripts with no shared runtime state.
+  return best[0];
 }
 
 function escapeHtml(str) {
@@ -57,12 +60,22 @@ function fmtClock(ms) {
 }
 
 /* Cache team pairings so they don't get re-randomized every 2.5s render tick.
-   Keyed by the sorted player ids in the group — same 4 players = same pairing. */
+   Keyed by the sorted player ids in the group PLUS history.length, so the
+   cache naturally invalidates whenever new results are recorded. Without
+   the history.length component, a group previewed early (before history
+   had enough entries to disambiguate) would keep serving that stale
+   pairing forever, even after later games changed which pairing is
+   actually "best" — which is exactly the bug where Next/Later disagreed
+   with what admin.js and the live court ended up showing. */
 let teamsCache = {};
+
+function teamsCacheKey(ids) {
+  return [...ids].sort().join('_') + '|' + history.length;
+}
 
 function formTeamsStable(ids) {
   if (!ids || ids.length < 4) return null;
-  const key = [...ids].sort().join('_');
+  const key = teamsCacheKey(ids);
   if (teamsCache[key]) return teamsCache[key];
   const teams = formTeams(ids);
   teamsCache[key] = teams;
