@@ -1,8 +1,21 @@
+/* ---------- State ---------- */
+let players = [];
+let queue = [];
+let courts = [null, null]; // courts[0] = Court 1, courts[1] = Court 2
+let history = [];          // teammate pairs (written by admin)
+let oppHistory = [];       // opponent pairs (written by admin)
+let courtStartTimes = [null, null];
+let lastCourtsKey = null;
+
 /* ---------- Helpers ---------- */
 function load(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    if (!raw) return fallback;
+    const val = JSON.parse(raw);
+    // Bad/corrupted saved data (wrong type) falls back instead of breaking the page
+    if (Array.isArray(fallback) && !Array.isArray(val)) return fallback;
+    return val;
   } catch (e) {
     return fallback;
   }
@@ -12,37 +25,13 @@ function playerById(id) {
   return players.find(p => p.id === id);
 }
 
-function pairKey(a, b) {
-  return [a, b].sort().join('_');
+function skipOf(id) {
+  const p = playerById(id);
+  return p && typeof p.skip === 'number' && !isNaN(p.skip) ? p.skip : 0;
 }
 
-function formTeams(ids) {
-  if (!ids || ids.length < 4) return null;
-  const [a, b, c, d] = ids;
-  const options = [
-    { teamA: [a, b], teamB: [c, d] },
-    { teamA: [a, c], teamB: [b, d] },
-    { teamA: [a, d], teamB: [b, c] },
-  ];
-
-  let best = [];
-  let bestScore = Infinity;
-
-  options.forEach(opt => {
-    const scoreA = history.includes(pairKey(opt.teamA[0], opt.teamA[1])) ? 1 : 0;
-    const scoreB = history.includes(pairKey(opt.teamB[0], opt.teamB[1])) ? 1 : 0;
-    const score = scoreA + scoreB;
-    if (score < bestScore) {
-      bestScore = score;
-      best = [opt];
-    } else if (score === bestScore) {
-      best.push(opt);
-    }
-  });
-  // Deterministic tie-break (NOT random) — must match admin.js exactly so
-  // this page's preview pairing always agrees with the admin page's,
-  // since they're separate scripts with no shared runtime state.
-  return best[0];
+function pairKey(a, b) {
+  return [a, b].sort().join('_');
 }
 
 function escapeHtml(str) {
@@ -59,18 +48,85 @@ function fmtClock(ms) {
   return `${m}:${s}`;
 }
 
-/* Cache team pairings so they don't get re-randomized every 2.5s render tick.
-   Keyed by the sorted player ids in the group PLUS history.length, so the
-   cache naturally invalidates whenever new results are recorded. Without
-   the history.length component, a group previewed early (before history
-   had enough entries to disambiguate) would keep serving that stale
-   pairing forever, even after later games changed which pairing is
-   actually "best" — which is exactly the bug where Next/Later disagreed
-   with what admin.js and the live court ended up showing. */
+/* Load courts data, migrating from the old single-court format if needed */
+function loadCourts() {
+  const stored = load('cq_courts', null);
+  if (Array.isArray(stored)) {
+    return [stored[0] || null, stored[1] || null];
+  }
+  const legacy = load('cq_court', null);
+  return [legacy || null, null];
+}
+
+/* ==========================================================================
+   MATCHMAKING — MUST STAY IDENTICAL TO THE ADMIN PAGE (courtqueue.js)
+   This page and the admin page are separate scripts with no shared runtime,
+   so both run the exact same deterministic logic on the same saved data
+   (players, queue, history, oppHistory). Same inputs = same Next/Later
+   groups and the same teams as the admin sees. If you change anything in
+   this section, change it in the admin script too.
+   ========================================================================== */
+
+/* How many rested players (front of line) are considered for the next 4.
+   Must equal MIX_WINDOW in the admin script. */
+const MIX_WINDOW = 8;
+
+function countPairs(list) {
+  const m = {};
+  list.forEach(k => { m[k] = (m[k] || 0) + 1; });
+  return m;
+}
+
+/* Repeat teammates weigh 3x more than repeat opponents */
+function togetherScore(a, b, tm, opp) {
+  const k = pairKey(a, b);
+  return (tm[k] || 0) * 3 + (opp[k] || 0);
+}
+
+function stableShuffleIndex(seedStr, mod) {
+  let hash = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    hash = (hash * 31 + seedStr.charCodeAt(i)) >>> 0;
+  }
+  return hash % mod;
+}
+
+function formTeams(ids) {
+  if (!ids || ids.length < 4) return null;
+  const [a, b, c, d] = ids;
+  const tm  = countPairs(history);
+  const opp = countPairs(oppHistory);
+
+  const options = [
+    { teamA: [a, b], teamB: [c, d] },
+    { teamA: [a, c], teamB: [b, d] },
+    { teamA: [a, d], teamB: [b, c] },
+  ];
+
+  const scored = options.map(o => {
+    const [p, q] = o.teamA;
+    const [r, s] = o.teamB;
+    const teammateRepeats = (tm[pairKey(p, q)] || 0) + (tm[pairKey(r, s)] || 0);
+    const opponentRepeats =
+      (opp[pairKey(p, r)] || 0) + (opp[pairKey(p, s)] || 0) +
+      (opp[pairKey(q, r)] || 0) + (opp[pairKey(q, s)] || 0);
+    return { o, score: teammateRepeats * 3 + opponentRepeats };
+  });
+
+  const min  = Math.min(...scored.map(s => s.score));
+  const best = scored.filter(s => s.score === min).map(s => s.o);
+  if (best.length === 1) return best[0];
+
+  const seed = [...ids].sort().join('_') + '|' + history.length;
+  return best[stableShuffleIndex(seed, best.length)];
+}
+
+/* Cache so the preview doesn't recompute every 2.5s tick. The key includes
+   history lengths so it refreshes whenever admin records a new game. */
 let teamsCache = {};
 
 function teamsCacheKey(ids) {
-  return [...ids].sort().join('_') + '|' + history.length;
+  return [...ids].sort().join('_') + '|' + history.length + '|' + oppHistory.length;
 }
 
 function formTeamsStable(ids) {
@@ -82,34 +138,94 @@ function formTeamsStable(ids) {
   return teams;
 }
 
-/* Small player chip used in NEXT UP / LATER */
+/* Queue ranked by: least rest remaining first, then FIFO */
+function rankedQueue() {
+  // Skip duplicates and anyone already on a court (matches admin's queue cleanup)
+  const onCourt = new Set();
+  courts.forEach(c => { if (c) [...c.teamA, ...c.teamB].forEach(id => onCourt.add(id)); });
+  return queue
+    .filter((id, i) => !onCourt.has(id) && queue.indexOf(id) === i)
+    .map((id, index) => ({ id, index, player: playerById(id) }))
+    .filter(entry => entry.player)
+    .sort((a, b) => {
+      const skipDiff = skipOf(a.id) - skipOf(b.id);
+      if (skipDiff !== 0) return skipDiff;
+      return a.index - b.index;
+    })
+    .map(entry => entry.id);
+}
+
+/* Keep the longest-waiting player, then choose the 3 others that make the
+   least-familiar group of 4 */
+function bestMixedFour(candidates) {
+  if (candidates.length <= 4) return candidates.slice(0, 4);
+
+  const tm  = countPairs(history);
+  const opp = countPairs(oppHistory);
+  const head = candidates[0];
+  const rest = candidates.slice(1);
+
+  let best = null;
+  let bestScore = Infinity;
+  let bestOrder = Infinity;
+
+  for (let i = 0; i < rest.length - 2; i++) {
+    for (let j = i + 1; j < rest.length - 1; j++) {
+      for (let k = j + 1; k < rest.length; k++) {
+        const group = [head, rest[i], rest[j], rest[k]];
+
+        let score = 0;
+        for (let x = 0; x < 4; x++) {
+          for (let y = x + 1; y < 4; y++) {
+            score += togetherScore(group[x], group[y], tm, opp);
+          }
+        }
+
+        const order = i + j + k;
+        if (score < bestScore || (score === bestScore && order < bestOrder)) {
+          best = group;
+          bestScore = score;
+          bestOrder = order;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+function pickFourFrom(ranked) {
+  if (ranked.length < 4) return null;
+
+  const rested = ranked.filter(id => skipOf(id) === 0);
+
+  // Small roster: not enough fully-rested players, pull in whoever has the
+  // least rest left (same fallback as admin)
+  if (rested.length < 4) return ranked.slice(0, 4);
+
+  return bestMixedFour(rested.slice(0, MIX_WINDOW));
+}
+
+/* Upcoming groups, built exactly like the admin's Queue / Next / Later */
+function buildGroups(maxGroups = Infinity) {
+  let pool = rankedQueue();
+  const groups = [];
+  let guard = 0; // hard stop so a bad state can never loop forever
+  while (pool.length && groups.length < maxGroups && guard++ < 50) {
+    const g = pickFourFrom(pool);
+    if (!g) { groups.push(pool); break; }
+    groups.push(g);
+    pool = pool.filter(id => !g.includes(id));
+  }
+  return groups;
+}
+
+/* ---------- Mini player chip used in NEXT UP / LATER ---------- */
 function miniPlayerBox(id) {
   const p = playerById(id) || { name: '—' };
   return `
     <div class="mini-player">
       <div class="mini-name">${escapeHtml(p.name)}</div>
     </div>`;
-}
-
-/* ---------- State ---------- */
-let players = [];
-let queue = [];
-let courts = [null, null]; // courts[0] = Court 1, courts[1] = Court 2
-let history = [];
-let courtStartTimes = [null, null];
-let lastCourtsKey = null;
-
-/* Load courts data, migrating from the old single-court format if needed */
-function loadCourts() {
-  const stored = load('cq_courts', null);
-  if (Array.isArray(stored)) {
-    // Make sure there are always exactly 2 slots
-    const result = [stored[0] || null, stored[1] || null];
-    return result;
-  }
-  // Legacy fallback: single court used to be stored under cq_court
-  const legacy = load('cq_court', null);
-  return [legacy || null, null];
 }
 
 /* ---------- Logo (same as admin) ---------- */
@@ -123,12 +239,10 @@ function applyLogo(data) {
   logoPlaceholder.hidden = true;
 }
 
-// Load logo from localStorage (same key as admin)
 const logoData = load('cq_logo', null);
 if (logoData) {
   applyLogo(logoData);
 } else {
-  // fallback try
   try {
     logoImg.src = 'abclogo.jpg';
     logoImg.hidden = false;
@@ -222,9 +336,8 @@ function renderCourt() {
   }).join('');
 }
 
-/* Build the markup for one queued game: each player gets their own mini box */
+/* Markup for one queued game: each player gets their own mini box */
 function renderGameGroup(g, title, need) {
-  // Full group of 4 -> try to split into two teams and show them "vs" style
   if (g.length === 4) {
     const teams = formTeamsStable(g);
     if (teams) {
@@ -244,7 +357,7 @@ function renderGameGroup(g, title, need) {
     }
   }
 
-  // Fewer than 4 players (still waiting for the group to fill up) -> flat row of boxes
+  // Fewer than 4 players (still waiting for the group to fill up)
   return `
     <div class="next-game">
       <div class="g-title">${title}${need}</div>
@@ -257,18 +370,15 @@ function renderGameGroup(g, title, need) {
 function renderNextGames() {
   const el = document.getElementById('nextGames');
 
-  if (!queue || queue.length === 0) {
+  const groups = buildGroups(2);
+
+  if (!groups.length) {
     teamsCache = {};
     el.innerHTML = `<div class="empty-msg">No upcoming games</div>`;
     return;
   }
 
-  const groups = [];
-  for (let i = 0; i < queue.length; i += 4) {
-    groups.push(queue.slice(i, i + 4));
-  }
-
-  el.innerHTML = groups.slice(0, 2).map((g, gi) => {
+  el.innerHTML = groups.map((g, gi) => {
     const title = gi === 0 ? 'Next' : 'Later';
     const need = g.length < 4 ? ` · needs ${4 - g.length}` : '';
     return renderGameGroup(g, title, need);
@@ -298,10 +408,11 @@ function renderTop3() {
 }
 
 function render() {
-  players = load('cq_players', []);
-  queue   = load('cq_queue', []);
-  courts  = loadCourts();
-  history = load('cq_history', []);
+  players    = load('cq_players', []);
+  queue      = load('cq_queue', []);
+  courts     = loadCourts();
+  history    = load('cq_history', []);
+  oppHistory = load('cq_oppHistory', []);
 
   // Also refresh logo in case admin changed it
   const latestLogo = load('cq_logo', null);
@@ -314,7 +425,6 @@ function render() {
 
 /* ---------- Smooth Timer ---------- */
 setInterval(() => {
-  // Navbar clock
   const clockEl = document.getElementById('clockTime');
   if (clockEl) {
     clockEl.textContent = new Date().toLocaleTimeString([], {
@@ -324,7 +434,6 @@ setInterval(() => {
     });
   }
 
-  // Game timers – only update the numbers, one per court
   courtStartTimes.forEach((start, i) => {
     if (start) {
       const timerEl = document.getElementById('courtTimer-' + i);

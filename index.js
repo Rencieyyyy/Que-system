@@ -1,14 +1,20 @@
 /* ---------- State ---------- */
-let players   = load('cq_players', []);
-let queue     = load('cq_queue', []);
-let courts    = loadCourts();          // [Court 1, Court 2] — each is null or {teamA, teamB, start}
-let history   = load('cq_history', []);
-let gameTimes = load('cq_gameTimes', []);
+let players     = load('cq_players', []);
+let queue       = load('cq_queue', []);
+let courts      = loadCourts();          // [Court 1, Court 2] — each is null or {teamA, teamB, start}
+let history     = load('cq_history', []);       // every pair that has been TEAMMATES (one entry per game per team)
+let oppHistory  = load('cq_oppHistory', []);    // every pair that has been OPPONENTS (4 entries per game)
+let matchHistory = load('cq_matchHistory', []);  // chronological list of full matchups (unused for now)
+let gameTimes   = load('cq_gameTimes', []);
 
 function load(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    if (!raw) return fallback;
+    const val = JSON.parse(raw);
+    // Bad/corrupted saved data (wrong type) falls back instead of breaking the app
+    if (Array.isArray(fallback) && !Array.isArray(val)) return fallback;
+    return val;
   } catch (e) { return fallback; }
 }
 
@@ -33,9 +39,7 @@ normalizePlayers();
 syncQueueWithPlayers();
 
 /* Guarantee invariant: every player who exists and isn't currently on a
-   court is somewhere in the queue. This is what actually guarantees "every
-   player I add can play" — it doesn't rely on every code path remembering
-   to queue people; it's checked and repaired every render. */
+   court is somewhere in the queue. Checked and repaired every render. */
 function syncQueueWithPlayers() {
   const onCourtIds = new Set();
   courts.forEach(c => {
@@ -45,8 +49,10 @@ function syncQueueWithPlayers() {
     }
   });
 
-  // Drop queue entries for players that no longer exist (e.g. after removePlayer)
-  queue = queue.filter(id => playerById(id));
+  // Drop queue entries for players that no longer exist, duplicates, and
+  // anyone who is currently on a court
+  queue = queue.filter((id, i) =>
+    playerById(id) && !onCourtIds.has(id) && queue.indexOf(id) === i);
 
   // Anyone not on court and missing from the queue gets appended to the back
   players.forEach(p => {
@@ -61,6 +67,7 @@ function save() {
   localStorage.setItem('cq_queue', JSON.stringify(queue));
   localStorage.setItem('cq_courts', JSON.stringify(courts));
   localStorage.setItem('cq_history', JSON.stringify(history));
+  localStorage.setItem('cq_oppHistory', JSON.stringify(oppHistory));
   localStorage.setItem('cq_gameTimes', JSON.stringify(gameTimes));
   localStorage.removeItem('cq_court'); // legacy key no longer used
 }
@@ -72,49 +79,77 @@ function isPlayerOnAnyCourt(id) {
   return courts.some(c => c && (c.teamA.includes(id) || c.teamB.includes(id)));
 }
 
-/* ---------- Smart team formation (avoid repeat teammates) ---------- */
+/* ---------- Pair counting ----------
+
+   THE BUG (why the same 4 kept playing each other):
+   1. Who plays next was decided ONLY by queue order + rest counters. The
+      winners and losers of a game are pushed to the back of the queue
+      together, so they came back out together as one block of 4 — the
+      same 4 people playing each other again and again, just re-split
+      into different teams. Players 5, 6, 7... never got mixed in.
+   2. The old history only remembered TEAMMATES as a yes/no flag, and
+      never remembered OPPONENTS at all. After a few games every pair was
+      "already used", so the check stopped helping.
+
+   THE FIX: remember how many times every pair has been teammates AND
+   opponents, then choose the group of 4 (and the split into teams) that
+   has played together the LEAST. Everything is still deterministic, so
+   the Next/Later preview always matches what actually happens. */
+
+function countPairs(list) {
+  const m = {};
+  list.forEach(k => { m[k] = (m[k] || 0) + 1; });
+  return m;
+}
+
+/* How "familiar" two players are. Repeat teammates weigh 3x more than
+   repeat opponents, since being partnered again is what feels stale. */
+function togetherScore(a, b, tm, opp) {
+  const k = pairKey(a, b);
+  return (tm[k] || 0) * 3 + (opp[k] || 0);
+}
+
+/* ---------- Smart team formation ---------- */
 function formTeams(ids) {
   const [a, b, c, d] = ids;
+  const tm  = countPairs(history);
+  const opp = countPairs(oppHistory);
+
   const options = [
     { teamA: [a, b], teamB: [c, d] },
     { teamA: [a, c], teamB: [b, d] },
     { teamA: [a, d], teamB: [b, c] },
   ];
 
-  let best = [];
-  let bestScore = Infinity;
-
-  options.forEach(opt => {
-    const scoreA = history.includes(pairKey(opt.teamA[0], opt.teamA[1])) ? 1 : 0;
-    const scoreB = history.includes(pairKey(opt.teamB[0], opt.teamB[1])) ? 1 : 0;
-    const score = scoreA + scoreB;
-
-    if (score < bestScore) {
-      bestScore = score;
-      best = [opt];
-    } else if (score === bestScore) {
-      best.push(opt);
-    }
+  const scored = options.map(o => {
+    const [p, q] = o.teamA;
+    const [r, s] = o.teamB;
+    const teammateRepeats = (tm[pairKey(p, q)] || 0) + (tm[pairKey(r, s)] || 0);
+    const opponentRepeats =
+      (opp[pairKey(p, r)] || 0) + (opp[pairKey(p, s)] || 0) +
+      (opp[pairKey(q, r)] || 0) + (opp[pairKey(q, s)] || 0);
+    return { o, score: teammateRepeats * 3 + opponentRepeats };
   });
 
-  // Deterministic tie-break (NOT random): if multiple pairing options are
-  // equally good, always take the first one in a fixed, stable order. This
-  // is what makes the admin page and the live display page — two separate
-  // scripts with no shared runtime state — always compute the exact same
-  // preview pairing from the same 4 ids + history, instead of each rolling
-  // its own random choice and sometimes disagreeing.
-  return best[0];
+  const min  = Math.min(...scored.map(s => s.score));
+  const best = scored.filter(s => s.score === min).map(s => s.o);
+  if (best.length === 1) return best[0];
+
+  // Still tied: stable (not random) pick so admin page and TV display agree
+  const seed = [...ids].sort().join('_') + '|' + history.length;
+  return best[stableShuffleIndex(seed, best.length)];
 }
 
-/* Cache the pairing for a given group of 4 players so it's computed once
-   and reused everywhere — this is what keeps "Next"/"Later" previews
-   consistent with the teams that actually get put on the court, instead
-   of formTeams() re-rolling a different pairing each time it's called.
-   The key includes history.length so the cache automatically invalidates
-   whenever a new result changes what the "best" pairing should be —
-   otherwise a group previewed early (before history disambiguated it)
-   would keep showing a stale pairing forever, even after later games
-   made a different pairing the correct one. */
+function stableShuffleIndex(seedStr, mod) {
+  let hash = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    hash = (hash * 31 + seedStr.charCodeAt(i)) >>> 0;
+  }
+  return hash % mod;
+}
+
+/* Cache so the "Next"/"Later" preview shows the exact teams that get put
+   on court. Cleared whenever a game starts (history changes). */
 let teamsCache = {};
 
 function teamsCacheKey(ids) {
@@ -129,34 +164,94 @@ function formTeamsStable(ids) {
   return teams;
 }
 
-/* Call this once a group's pairing has actually been used to start a game,
-   so the cache doesn't hold onto stale entries forever. */
-function clearTeamsCacheFor(ids) {
-  delete teamsCache[teamsCacheKey(ids)];
+/* Remember who teamed with / played against whom */
+function recordMatchup(teams) {
+  const [a, b] = teams.teamA;
+  const [c, d] = teams.teamB;
+  history.push(pairKey(a, b), pairKey(c, d));
+  oppHistory.push(pairKey(a, c), pairKey(a, d), pairKey(b, c), pairKey(b, d));
+  teamsCache = {};
 }
 
-/* ---------- Fair rotation helpers ---------- */
+/* ---------- Fair rotation + mixing ---------- */
 
-/* Look through the queue, in order, and collect the first 4 players who
-   are NOT resting (skip === 0). Players who are resting stay in place in
-   the queue — they're just skipped over when picking, never removed or
-   pushed to the back out of turn. Returns null if fewer than 4 are ready. */
-function pickNextFour(fromQueue) {
-  const q = fromQueue || queue;
-  const ids = [];
-  for (const id of q) {
-    const p = playerById(id);
-    if (p && p.skip === 0) {
-      ids.push(id);
-      if (ids.length === 4) break;
+/* How many rested players (from the front of the line) are considered
+   when picking the next 4. The person who has waited longest is ALWAYS
+   included; the other 3 are chosen from this window to be the people
+   they've played with least. Bigger = more mixing, smaller = stricter
+   first-come-first-served. */
+const MIX_WINDOW = 8;
+
+/* Queue ranked by: least rest remaining first, then FIFO. */
+function rankedQueue() {
+  return queue
+    .map((id, index) => ({ id, index, player: playerById(id) }))
+    .filter(entry => entry.player)
+    .sort((a, b) => {
+      const skipDiff = a.player.skip - b.player.skip;
+      if (skipDiff !== 0) return skipDiff;
+      return a.index - b.index;
+    })
+    .map(entry => entry.id);
+}
+
+/* From a list of candidates (front of line first), keep the head of the
+   line and pick the 3 others that make the least-familiar group of 4. */
+function bestMixedFour(candidates) {
+  if (candidates.length <= 4) return candidates.slice(0, 4);
+
+  const tm  = countPairs(history);
+  const opp = countPairs(oppHistory);
+  const head = candidates[0];
+  const rest = candidates.slice(1);
+
+  let best = null;
+  let bestScore = Infinity;
+  let bestOrder = Infinity;
+
+  for (let i = 0; i < rest.length - 2; i++) {
+    for (let j = i + 1; j < rest.length - 1; j++) {
+      for (let k = j + 1; k < rest.length; k++) {
+        const group = [head, rest[i], rest[j], rest[k]];
+
+        let score = 0;
+        for (let x = 0; x < 4; x++) {
+          for (let y = x + 1; y < 4; y++) {
+            score += togetherScore(group[x], group[y], tm, opp);
+          }
+        }
+
+        // Ties go to whoever has waited longest (lowest queue positions)
+        const order = i + j + k;
+        if (score < bestScore || (score === bestScore && order < bestOrder)) {
+          best = group;
+          bestScore = score;
+          bestOrder = order;
+        }
+      }
     }
   }
-  return ids.length === 4 ? ids : null;
+  return best;
 }
 
-/* Every time a game starts (on either court), every resting player's
-   wait ticks down by one "game". This is what makes "rest 1 game" /
-   "rest 2 games" concrete instead of a queue-position hack. */
+/* Pick 4 from an already-ranked list, or null if fewer than 4 exist. */
+function pickFourFrom(ranked) {
+  if (ranked.length < 4) return null;
+
+  const rested = ranked.filter(id => playerById(id).skip === 0);
+
+  // Small roster: not enough fully-rested players, so pull in whoever has
+  // the least rest left (otherwise the court would sit empty forever).
+  if (rested.length < 4) return ranked.slice(0, 4);
+
+  return bestMixedFour(rested.slice(0, MIX_WINDOW));
+}
+
+function pickNextFour() {
+  return pickFourFrom(rankedQueue());
+}
+
+/* Every time a game starts, every resting player's wait ticks down. */
 function tickRestCounters() {
   queue.forEach(id => {
     const p = playerById(id);
@@ -164,16 +259,24 @@ function tickRestCounters() {
   });
 }
 
-/* Non-destructive preview of upcoming eligible groups, used by the
-   "Next / Later" panel so it never shows resting players as about to play. */
-function nextEligibleGroups(maxGroups = 2) {
-  const eligible = queue.filter(id => {
-    const p = playerById(id);
-    return p && p.skip === 0;
-  });
+/* Non-destructive preview of upcoming groups, built with the exact same
+   picker as real games so the Queue tab and Next/Later never lie. The
+   last group may have fewer than 4 (needs more players). */
+function buildGroups(maxGroups = Infinity) {
+  let pool = rankedQueue();
   const groups = [];
-  for (let i = 0; i < eligible.length; i += 4) groups.push(eligible.slice(i, i + 4));
-  return groups.slice(0, maxGroups);
+  let guard = 0; // hard stop so a bad state can never loop forever
+  while (pool.length && groups.length < maxGroups && guard++ < 50) {
+    const g = pickFourFrom(pool);
+    if (!g) { groups.push(pool); break; }
+    groups.push(g);
+    pool = pool.filter(id => !g.includes(id));
+  }
+  return groups;
+}
+
+function nextEligibleGroups(maxGroups = 2) {
+  return buildGroups(maxGroups);
 }
 
 /* ---------- Actions ---------- */
@@ -205,6 +308,15 @@ function removePlayer(id) {
   render();
 }
 
+/* Put 4 players on a court: pull them from the queue, form teams, and
+   record who teamed/faced whom. Shared by startGame and endGame. */
+function beginGame(courtIndex, ids) {
+  queue = queue.filter(id => !ids.includes(id));
+  const teams = formTeamsStable(ids);
+  recordMatchup(teams);
+  courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
+}
+
 /* Start a game on a specific court index (0 = Court 1, 1 = Court 2) */
 function startGame(courtIndex) {
   if (courts[courtIndex]) {
@@ -214,18 +326,11 @@ function startGame(courtIndex) {
 
   const ids = pickNextFour();
   if (!ids) {
-    alert('Need at least 4 players who are not resting to start a game.');
+    alert('Need at least 4 players in the queue to start a game.');
     return;
   }
 
-  queue = queue.filter(id => !ids.includes(id));
-
-  const teams = formTeamsStable(ids);
-  clearTeamsCacheFor(ids);
-  history.push(pairKey(teams.teamA[0], teams.teamA[1]));
-  history.push(pairKey(teams.teamB[0], teams.teamB[1]));
-  courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
-
+  beginGame(courtIndex, ids);
   tickRestCounters();
 
   save();
@@ -236,7 +341,7 @@ function startGame(courtIndex) {
 /* Decide whether to ask which court, auto-pick the only free one, or block */
 function openStartGameModal() {
   if (!pickNextFour()) {
-    alert('Need at least 4 players who are not resting to start a game.');
+    alert('Need at least 4 players in the queue to start a game.');
     return;
   }
 
@@ -248,12 +353,10 @@ function openStartGameModal() {
   }
 
   if (freeIndexes.length === 1) {
-    // Only one court is free — just start on it, no need to ask
     startGame(freeIndexes[0]);
     return;
   }
 
-  // Both courts free — let the admin pick
   modalTitle.textContent = 'Choose a court';
   modalBody.innerHTML = `
     <p style="margin:-4px 0 16px;color:var(--text-muted);font-size:0.9rem;">
@@ -293,26 +396,18 @@ function endGame(winner, courtIndex) {
   gameTimes.push(Date.now() - court.start);
   if (gameTimes.length > 20) gameTimes = gameTimes.slice(-20);
 
-  // Everyone who just finished goes to the BACK of the queue — true FIFO,
-  // so no one can cut ahead of players who've been waiting longer.
+  // Finished players go to the BACK of the queue — no cutting ahead.
   queue.push(...winners, ...losers);
 
   courts[courtIndex] = null;
 
-  // Auto-start the next game on the court that just freed up, if 4
-  // non-resting players are available.
+  // Auto-start the next game on the freed court if 4 players are available.
+  // Rest counters only tick when a game actually starts.
   const nextIds = pickNextFour();
   if (nextIds) {
-    queue = queue.filter(id => !nextIds.includes(id));
-    const teams = formTeamsStable(nextIds);
-    clearTeamsCacheFor(nextIds);
-    history.push(pairKey(teams.teamA[0], teams.teamA[1]));
-    history.push(pairKey(teams.teamB[0], teams.teamB[1]));
-    courts[courtIndex] = { teamA: teams.teamA, teamB: teams.teamB, start: Date.now() };
+    beginGame(courtIndex, nextIds);
+    tickRestCounters();
   }
-
-  // A game started (or attempted) — tick everyone's rest counter down
-  tickRestCounters();
 
   save();
   render();
@@ -325,6 +420,8 @@ function resetAll() {
   queue = [];
   courts = [null, null];
   history = [];
+  oppHistory = [];
+  teamsCache = {};
   gameTimes = [];
   save();
   render();
@@ -388,18 +485,14 @@ function renderCourt() {
     const courtNum = i + 1;
 
     if (!court) {
-      const eligibleWaiting = queue.filter(id => {
-        const p = playerById(id);
-        return p && p.skip === 0;
-      }).length;
       return `
         <div class="court-card court-card-empty">
           <div class="court-top">
             <span class="court-name">Court ${courtNum}</span>
           </div>
           <div class="court-empty">
-            <p>Court is free. ${eligibleWaiting < 4
-              ? `Waiting on ${4 - eligibleWaiting} more ready player${4 - eligibleWaiting === 1 ? '' : 's'} to start a game.`
+            <p>Court is free. ${queue.length < 4
+              ? `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`
               : 'Ready to start the next game.'}</p>
           </div>
         </div>`;
@@ -482,11 +575,6 @@ function attachCertificateHandlers() {
 }
 
 function renderQueue() {
-  const eligibleCount = queue.filter(id => {
-    const p = playerById(id);
-    return p && p.skip === 0;
-  }).length;
-
   els.statWaiting.textContent = queue.length;
   els.navQueueCount.textContent = queue.length;
   els.capacityCount.textContent = players.length;
@@ -497,57 +585,31 @@ function renderQueue() {
     return;
   }
 
-  // Group by eligible players only, so groups always represent real
-  // "who plays next" batches. Resting players are listed separately below.
-  const eligibleIds = queue.filter(id => {
-    const p = playerById(id);
-    return p && p.skip === 0;
-  });
-  const restingIds = queue.filter(id => {
-    const p = playerById(id);
-    return p && p.skip > 0;
-  });
+  // Groups come from the same picker real games use, so "Up next" always
+  // matches who actually plays next.
+  const groups = buildGroups();
 
-  const groups = [];
-  for (let i = 0; i < eligibleIds.length; i += 4) {
-    groups.push(eligibleIds.slice(i, i + 4));
-  }
-
-  const groupsHtml = groups.map((g, gi) => `
-    <div class="queue-group">
-      <div class="queue-group-head">
-        <span class="queue-group-title">${
-          gi === 0 && g.length === 4 ? 'Up next' : `Group ${gi + 1}`
-        }${g.length < 4 ? ` · needs ${4 - g.length} more` : ''}</span>
-      </div>
-      <div class="queue-players">
-        ${g.map(id => {
-          const p = playerById(id);
-          return `<span class="player-chip">${escapeHtml(p ? p.name : '—')}
-            <button data-replace="${id}" title="Replace">↻</button>
-            <button data-remove="${id}" title="Remove">&times;</button></span>`;
-        }).join('')}
-      </div>
-    </div>`).join('');
-
-  const restingHtml = restingIds.length ? `
-    <div class="queue-group">
-      <div class="queue-group-head">
-        <span class="queue-group-title">Resting</span>
-      </div>
-      <div class="queue-players">
-        ${restingIds.map(id => {
-          const p = playerById(id);
-          if (!p) return '';
-          return `<span class="player-chip" style="opacity:0.6;">${escapeHtml(p.name)}
-            <span style="font-size:0.75em;margin-left:4px;">(${p.skip} game${p.skip === 1 ? '' : 's'} left)</span>
-            <button data-replace="${id}" title="Replace">↻</button>
-            <button data-remove="${id}" title="Remove">&times;</button></span>`;
-        }).join('')}
-      </div>
-    </div>` : '';
-
-  els.queueList.innerHTML = `<div class="list-card">${groupsHtml}${restingHtml}</div>`;
+  els.queueList.innerHTML = `<div class="list-card">${
+    groups.map((g, gi) => `
+      <div class="queue-group">
+        <div class="queue-group-head">
+          <span class="queue-group-title">${
+            gi === 0 && g.length === 4 ? 'Up next' : `Group ${gi + 1}`
+          }${g.length < 4 ? ` · needs ${4 - g.length} more` : ''}</span>
+        </div>
+        <div class="queue-players">
+          ${g.map(id => {
+            const p = playerById(id);
+            const restTag = p && p.skip > 0
+              ? ` <span style="font-size:0.75em;opacity:0.65;">(resting · ${p.skip} game${p.skip === 1 ? '' : 's'} left)</span>`
+              : '';
+            return `<span class="player-chip">${escapeHtml(p ? p.name : '—')}${restTag}
+              <button data-replace="${id}" title="Replace">↻</button>
+              <button data-remove="${id}" title="Remove">&times;</button></span>`;
+          }).join('')}
+        </div>
+      </div>`).join('')
+  }</div>`;
 
   els.queueList.querySelectorAll('[data-remove]').forEach(btn => {
     btn.onclick = () => removePlayer(btn.getAttribute('data-remove'));
