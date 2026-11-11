@@ -163,14 +163,15 @@
     /* ---------- Success ---------- */
     .done { text-align: center; padding-top: 6px; }
     .spot {
-      font-family: var(--display);
-      font-weight: 800;
-      font-size: 5.5rem;
-      line-height: 1;
-      letter-spacing: -3px;
-      color: var(--court);
-      margin: 4px 0 0;
-    }
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 5.5rem;
+  line-height: 1.02;
+  letter-spacing: -3px;
+  color: var(--court);
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
     .done h2 { font-family: var(--display); font-size: 1.5rem; margin: 6px 0 8px; letter-spacing: -.5px; }
     .done p { color: var(--muted); margin: 0 auto; max-width: 30ch; line-height: 1.45; }
     .link {
@@ -222,7 +223,7 @@
       </section>
 
       <section class="done" id="doneView" hidden aria-live="polite">
-        <p class="spot" id="spot">#1</p>
+        <p class="spot" id="spot"></p>
         <h2 id="doneTitle">You're in!</h2>
         <p>Keep an eye on the screen. Your name shows up when your game is next.</p>
         <button class="link" id="againBtn" type="button">Register another player</button>
@@ -266,7 +267,12 @@
       if (!result || result.error) { fail((result && result.error) || 'Something went wrong. Try again.'); return; }
 
      
-      document.getElementById('doneTitle').textContent = "You're in, " + result.player.name + '!';
+   const spotEl = document.getElementById('spot');
+spotEl.textContent = result.player.name;
+spotEl.style.fontSize = '';
+const len = result.player.name.length;
+if (len > 8) spotEl.style.fontSize = Math.max(2.2, 5.5 * 8 / len) + 'rem';
+document.getElementById('doneTitle').textContent = "You're in!";
       headline.textContent = 'See you on court.';
       formView.hidden = true;
       doneView.hidden = false;
