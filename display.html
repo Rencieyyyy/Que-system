@@ -540,6 +540,207 @@
         font-size: 2.1rem;
       }
     }
+    /* ===== QR CODE BOX (bottom right, in-flow so nothing overlaps) ===== */
+.qr-footer {
+  margin-top: auto;            /* pushes it to the bottom of the page */
+  display: flex;
+  justify-content: flex-end;   /* bottom RIGHT */
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
+.qr-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+}
+
+.qr-img-wrap {
+  width: 110px;
+  height: 110px;
+  border-radius: 10px;
+  background: #ffffff;         /* keeps the QR scannable in dark mode */
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.qr-img-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qr-placeholder {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.qr-text strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.qr-text span {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 800px) {
+  .qr-footer { justify-content: center; }
+}
+/* ===== SINGLE-PAGE, NO-SCROLL LAYOUT (overrides) ===== */
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Wrapper fills whatever is left under the navbar, as a grid */
+.display-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "play play"
+    "next next"
+    "potn qr";
+  gap: clamp(8px, 1.6vh, 16px);
+  padding: clamp(8px, 1.6vh, 16px) 22px clamp(8px, 1.8vh, 18px);
+  overflow: hidden;
+}
+
+#inPlayPanel { grid-area: play; }
+#nextUpPanel { grid-area: next; }
+.potn-panel  { grid-area: potn; min-height: 0; overflow: hidden; }
+.qr-footer   { grid-area: qr; margin-top: 0; padding-top: 0; align-self: stretch; }
+
+/* Compact panels */
+.display-panel {
+  padding: clamp(8px, 1.5vh, 16px) 18px;
+  border-radius: 16px;
+}
+
+.display-panel h2 {
+  font-size: clamp(0.75rem, 1.7vh, 0.92rem);
+  margin-bottom: clamp(5px, 1vh, 12px);
+}
+
+/* IN PLAY */
+.court-block {
+  padding: clamp(8px, 1.4vh, 16px) 18px;
+}
+
+.court-label {
+  font-size: clamp(0.7rem, 1.6vh, 0.85rem);
+}
+
+.court-timer {
+  font-size: clamp(1.4rem, 4.2vh, 2.3rem);
+  margin: 0 0 clamp(6px, 1.2vh, 16px);
+}
+
+.players-grid {
+  gap: clamp(6px, 1.2vh, 12px);
+}
+
+.player-box {
+  min-height: clamp(44px, 7.5vh, 92px);
+  padding: clamp(4px, 1vh, 14px) 10px;
+  font-size: clamp(1rem, 2.8vh, 1.55rem);
+}
+
+.vs-badge {
+  width: clamp(32px, 5vh, 46px);
+  height: clamp(32px, 5vh, 46px);
+  font-size: clamp(0.7rem, 1.8vh, 0.95rem);
+}
+
+/* NEXT UP */
+.next-game {
+  padding: clamp(6px, 1vh, 10px) 14px clamp(6px, 1.2vh, 12px);
+}
+
+.mini-team { gap: clamp(3px, 0.6vh, 6px); }
+
+.mini-player {
+  padding: clamp(3px, 0.7vh, 6px) 10px;
+}
+
+.mini-player .mini-name {
+  font-size: clamp(0.8rem, 2vh, 0.98rem);
+}
+
+.mini-vs {
+  width: clamp(22px, 3.4vh, 28px);
+  height: clamp(22px, 3.4vh, 28px);
+}
+
+/* PLAYER OF THE NIGHT */
+#top3List { gap: clamp(4px, 0.8vh, 8px); }
+
+#top3List .list-row.top3 {
+  padding: clamp(5px, 1vh, 11px) 15px;
+}
+
+#top3List .list-row.top3:has(.rank-badge.r1) {
+  transform: none;  /* scale would get clipped by the panel edge */
+}
+
+#top3List .name { font-size: clamp(0.9rem, 2.2vh, 1.05rem); }
+
+.rank-badge {
+  width: clamp(26px, 4vh, 34px);
+  height: clamp(26px, 4vh, 34px);
+}
+
+.empty-msg { padding: clamp(8px, 2vh, 28px) 12px; }
+
+/* QR box matches the height of the Player of the Night row */
+.qr-box {
+  height: 100%;
+  padding: clamp(6px, 1.2vh, 12px) 16px;
+}
+
+.qr-img-wrap {
+  width: clamp(70px, 14vh, 120px);
+  height: clamp(70px, 14vh, 120px);
+}
+
+/* Phones / narrow screens: stack and allow scrolling again */
+@media (max-width: 800px) {
+  html, body { overflow: auto; height: auto; }
+  body { display: block; }
+  .display-wrapper {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+  .qr-footer { justify-content: center; }
+}
   </style>
 </head>
 <body>
@@ -566,7 +767,7 @@
     </div>
   </div>
 
-  <div class="display-wrapper">
+    <div class="display-wrapper">
 
     <!-- IN PLAY: Court 1 and Court 2 side by side -->
     <div class="display-panel" id="inPlayPanel">
@@ -587,6 +788,21 @@
     <div class="display-panel potn-panel">
       <h2>🔥PLAYER OF THE NIGHT</h2>
       <div id="top3List"></div>
+    </div>
+
+    <!-- QR CODE (bottom right) - must be INSIDE display-wrapper -->
+    <div class="qr-footer">
+      <div class="qr-box">
+        <div class="qr-img-wrap">
+          <img id="qrImg" src="qr.png" alt="QR Code"
+               onerror="this.hidden=true;document.getElementById('qrPlaceholder').hidden=false;" />
+          <div id="qrPlaceholder" class="qr-placeholder" hidden>QR CODE<br>HERE</div>
+        </div>
+        <div class="qr-text">
+          <strong>Scan me</strong>
+          <span>Join the queue</span>
+        </div>
+      </div>
     </div>
 
   </div>
