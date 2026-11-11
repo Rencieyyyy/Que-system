@@ -231,43 +231,9 @@
     </div>
   </main>
 
+  <script>window.CQ_NOSYNC = true;</script>
+  <script src="supabase-sync.js"></script>
   <script>
-    /* Uses the same localStorage keys and player shape as the admin page */
-    const MAX_PLAYERS = 30;
-
-    function load(key, fallback) {
-      try {
-        const raw = localStorage.getItem(key);
-        if (!raw) return fallback;
-        const val = JSON.parse(raw);
-        if (Array.isArray(fallback) && !Array.isArray(val)) return fallback;
-        return val;
-      } catch (e) { return fallback; }
-    }
-
-    function uid() { return 'p' + Math.random().toString(36).slice(2, 9); }
-
-    function register(name) {
-      const players = load('cq_players', []);
-      const queue = load('cq_queue', []);
-
-      if (players.length >= MAX_PLAYERS) {
-        return { error: 'The queue is full (' + MAX_PLAYERS + ' players). Please ask the host.' };
-      }
-      const dupe = players.some(p => p.name.trim().toLowerCase() === name.toLowerCase());
-      if (dupe) {
-        return { error: 'That name is taken. Add a last initial, like "' + name + ' R."' };
-      }
-
-      const p = { id: uid(), name: name, wins: 0, skip: 0 };
-      players.push(p);
-      queue.push(p.id);
-      localStorage.setItem('cq_players', JSON.stringify(players));
-      localStorage.setItem('cq_queue', JSON.stringify(queue));
-
-      return { player: p, position: queue.length };
-    }
-
     const input = document.getElementById('playerName');
     const field = document.getElementById('field');
     const errEl = document.getElementById('error');
@@ -283,19 +249,21 @@
       input.focus();
     }
 
-    function submit() {
+    async function submit() {
       const name = input.value.replace(/\s+/g, ' ').trim();
       errEl.textContent = '';
       field.classList.remove('invalid');
       if (!name) { fail('Enter your name to join.'); return; }
 
       joinBtn.disabled = true;
+      joinBtn.textContent = 'Joining...';
       let result;
-      try { result = register(name); }
-      catch (e) { result = { error: 'Could not save. Please try again.' }; }
+      try { result = await CQ.register(name); }
+      catch (e) { result = { error: 'Could not connect. Check your internet and try again.' }; }
       joinBtn.disabled = false;
+      joinBtn.textContent = 'Join the queue';
 
-      if (result.error) { fail(result.error); return; }
+      if (!result || result.error) { fail((result && result.error) || 'Something went wrong. Try again.'); return; }
 
       document.getElementById('spot').textContent = '#' + result.position;
       document.getElementById('doneTitle').textContent = "You're in, " + result.player.name + '!';

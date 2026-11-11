@@ -836,3 +836,15 @@ darkModeToggle.addEventListener('click', () => {
 /* ---------- Init ---------- */
 save();
 render();
+/* Refresh from Supabase when players register or another device changes data */
+function reloadState() {
+  players      = load('cq_players', []);
+  queue        = load('cq_queue', []);
+  courts       = loadCourts();
+  history      = load('cq_history', []);
+  oppHistory   = load('cq_oppHistory', []);
+  gameTimes    = load('cq_gameTimes', []);
+  normalizePlayers();
+  render();
+}
+window.cqOnRemoteChange = reloadState;
