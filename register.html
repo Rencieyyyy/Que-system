@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1f8f7a" />
+  <title>ABCDink Pickleyard – Join the Queue</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --court: #1f8f7a;
+      --court-deep: #166b5b;
+      --ball: #d8f245;
+      --ink: #0f2a25;
+      --paper: #ffffff;
+      --sheet: #f4faf8;
+      --muted: #5c7872;
+      --line: #cfe3de;
+      --error: #c0392b;
+      --display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+      --body: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --court: #176b5c;
+        --court-deep: #0f4a40;
+        --ink: #eaf6f3;
+        --paper: #162b27;
+        --sheet: #0e1c19;
+        --muted: #8fb0a9;
+        --line: #2b443e;
+        --error: #ff8f80;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: var(--body);
+      background: var(--court);
+      color: var(--ink);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---------- Court header ---------- */
+    .court {
+      position: relative;
+      background: var(--court);
+      padding: calc(env(safe-area-inset-top, 0px) + 22px) 22px 74px;
+      overflow: hidden;
+      isolation: isolate;
+    }
+    .lines { position: absolute; inset: 14px; z-index: -1; pointer-events: none; }
+    .lines::before {
+      content: ""; position: absolute; inset: 0;
+      border: 2px solid rgba(255,255,255,.4);
+      border-radius: 4px;
+    }
+    .lines i { position: absolute; background: rgba(255,255,255,.4); }
+    .lines .net   { left: 50%; top: 0; bottom: 0; width: 2px; }
+    .lines .k1    { left: 28%; top: 0; bottom: 0; width: 2px; }
+    .lines .k2    { left: 72%; top: 0; bottom: 0; width: 2px; }
+    .lines .c1    { left: 0; right: 72%; top: 50%; height: 2px; }
+    .lines .c2    { left: 72%; right: 0; top: 50%; height: 2px; }
+
+    .brand { display: flex; align-items: center; gap: 12px; color: #fff; }
+    .logo {
+      width: 48px; height: 48px; border-radius: 14px; background: #fff;
+      display: grid; place-items: center; overflow: hidden; flex-shrink: 0;
+    }
+    .logo img { width: 100%; height: 100%; object-fit: cover; }
+    .logo span { font-size: 22px; }
+    .brand b { font-family: var(--display); font-size: 1.15rem; font-weight: 800; letter-spacing: -.2px; display: block; }
+    .brand small { font-size: .82rem; opacity: .9; }
+
+    h1 {
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: clamp(2.6rem, 13vw, 3.6rem);
+      line-height: .95;
+      letter-spacing: -1.5px;
+      color: #fff;
+      margin: 34px 0 0;
+      max-width: 9ch;
+    }
+
+    .ball {
+      position: absolute; right: 26px; bottom: 46px;
+      width: 76px; height: 76px; border-radius: 50%;
+      background:
+        radial-gradient(circle at 30% 28%, #f0ff86 0 12%, transparent 13%),
+        radial-gradient(circle, rgba(15,42,37,.28) 0 5%, transparent 6%) 0 0 / 19px 19px,
+        var(--ball);
+      box-shadow: 0 10px 0 -2px rgba(0,0,0,.14), inset -6px -8px 0 rgba(0,0,0,.08);
+      transform: rotate(-14deg);
+    }
+    .ball.hop { animation: hop .7s cubic-bezier(.3,.7,.4,1); }
+    @keyframes hop {
+      0%   { transform: translateY(0) rotate(-14deg); }
+      35%  { transform: translateY(-34px) rotate(40deg); }
+      70%  { transform: translateY(0) rotate(90deg); }
+      85%  { transform: translateY(-9px) rotate(120deg); }
+      100% { transform: translateY(0) rotate(-14deg); }
+    }
+
+    /* ---------- Sheet ---------- */
+    .sheet {
+      flex: 1;
+      position: relative;
+      z-index: 1;
+      margin-top: -28px;
+      background: var(--sheet);
+      border-radius: 28px 28px 0 0;
+      padding: 44px 22px calc(env(safe-area-inset-bottom, 0px) + 32px);
+    }
+    .inner { max-width: 440px; margin: 0 auto; }
+
+    label { display: block; font-weight: 700; font-size: 1.05rem; margin-bottom: 10px; }
+    .hint { color: var(--muted); font-size: .95rem; margin: -4px 0 14px; }
+
+    input[type="text"] {
+      width: 100%;
+      font: 500 1.3rem var(--body);
+      color: var(--ink);
+      background: var(--paper);
+      border: 2px solid var(--line);
+      border-radius: 16px;
+      padding: 17px 18px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input[type="text"]::placeholder { color: var(--muted); opacity: .7; }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--court);
+      box-shadow: 0 0 0 4px rgba(31,143,122,.2);
+    }
+    .invalid input[type="text"] { border-color: var(--error); }
+
+    .err { color: var(--error); font-size: .92rem; font-weight: 500; min-height: 1.3em; margin: 8px 2px 0; }
+
+    .btn {
+      width: 100%;
+      margin-top: 10px;
+      padding: 18px;
+      font: 800 1.15rem var(--display);
+      letter-spacing: -.2px;
+      color: #0f2a25;
+      background: var(--ball);
+      border: none;
+      border-radius: 16px;
+      box-shadow: 0 5px 0 #a9c223;
+      cursor: pointer;
+      transition: transform .08s, box-shadow .08s;
+    }
+    .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 #a9c223; }
+    .btn:disabled { opacity: .6; }
+    .btn:focus-visible, .link:focus-visible { outline: 3px solid var(--court); outline-offset: 3px; }
+
+    /* ---------- Success ---------- */
+    .done { text-align: center; padding-top: 6px; }
+    .spot {
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: 5.5rem;
+      line-height: 1;
+      letter-spacing: -3px;
+      color: var(--court);
+      margin: 4px 0 0;
+    }
+    .done h2 { font-family: var(--display); font-size: 1.5rem; margin: 6px 0 8px; letter-spacing: -.5px; }
+    .done p { color: var(--muted); margin: 0 auto; max-width: 30ch; line-height: 1.45; }
+    .link {
+      margin-top: 26px; background: none; border: none;
+      font: 700 1rem var(--body); color: var(--court);
+      text-decoration: underline; text-underline-offset: 4px; cursor: pointer;
+    }
+    [hidden] { display: none !important; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .ball.hop { animation: none; }
+      .btn { transition: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="court">
+    <div class="lines" aria-hidden="true">
+      <i class="net"></i><i class="k1"></i><i class="k2"></i><i class="c1"></i><i class="c2"></i>
+    </div>
+
+    <div class="brand">
+      <div class="logo">
+        <img id="logoImg" src="abclogo.jpg" alt="" onerror="this.hidden=true;document.getElementById('logoFallback').hidden=false;" />
+        <span id="logoFallback" hidden>🏓</span>
+      </div>
+      <div>
+        <b>ABCDink Pickleyard</b>
+        <small>Player registration</small>
+      </div>
+    </div>
+
+    <h1 id="headline">Get in line.</h1>
+    <div class="ball" id="ball" aria-hidden="true"></div>
+  </header>
+
+  <main class="sheet">
+    <div class="inner">
+
+      <section id="formView">
+        <label for="playerName">What's your name?</label>
+        <p class="hint">That's all we need. You'll show up on the big screen.</p>
+        <div id="field">
+          <input type="text" id="playerName" maxlength="30" autocomplete="off" autocapitalize="words" enterkeyhint="go" placeholder="e.g. Maria" />
+        </div>
+        <p class="err" id="error" role="alert"></p>
+        <button class="btn" id="joinBtn" type="button">Join the queue</button>
+      </section>
+
+      <section class="done" id="doneView" hidden aria-live="polite">
+        <p class="spot" id="spot">#1</p>
+        <h2 id="doneTitle">You're in!</h2>
+        <p>Keep an eye on the screen. Your name shows up when your game is next.</p>
+        <button class="link" id="againBtn" type="button">Register another player</button>
+      </section>
+
+    </div>
+  </main>
+
+  <script>
+    /* Uses the same localStorage keys and player shape as the admin page */
+    const MAX_PLAYERS = 30;
+
+    function load(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        const val = JSON.parse(raw);
+        if (Array.isArray(fallback) && !Array.isArray(val)) return fallback;
+        return val;
+      } catch (e) { return fallback; }
+    }
+
+    function uid() { return 'p' + Math.random().toString(36).slice(2, 9); }
+
+    function register(name) {
+      const players = load('cq_players', []);
+      const queue = load('cq_queue', []);
+
+      if (players.length >= MAX_PLAYERS) {
+        return { error: 'The queue is full (' + MAX_PLAYERS + ' players). Please ask the host.' };
+      }
+      const dupe = players.some(p => p.name.trim().toLowerCase() === name.toLowerCase());
+      if (dupe) {
+        return { error: 'That name is taken. Add a last initial, like "' + name + ' R."' };
+      }
+
+      const p = { id: uid(), name: name, wins: 0, skip: 0 };
+      players.push(p);
+      queue.push(p.id);
+      localStorage.setItem('cq_players', JSON.stringify(players));
+      localStorage.setItem('cq_queue', JSON.stringify(queue));
+
+      return { player: p, position: queue.length };
+    }
+
+    const input = document.getElementById('playerName');
+    const field = document.getElementById('field');
+    const errEl = document.getElementById('error');
+    const joinBtn = document.getElementById('joinBtn');
+    const formView = document.getElementById('formView');
+    const doneView = document.getElementById('doneView');
+    const headline = document.getElementById('headline');
+    const ball = document.getElementById('ball');
+
+    function fail(msg) {
+      errEl.textContent = msg;
+      field.classList.add('invalid');
+      input.focus();
+    }
+
+    function submit() {
+      const name = input.value.replace(/\s+/g, ' ').trim();
+      errEl.textContent = '';
+      field.classList.remove('invalid');
+      if (!name) { fail('Enter your name to join.'); return; }
+
+      joinBtn.disabled = true;
+      let result;
+      try { result = register(name); }
+      catch (e) { result = { error: 'Could not save. Please try again.' }; }
+      joinBtn.disabled = false;
+
+      if (result.error) { fail(result.error); return; }
+
+      document.getElementById('spot').textContent = '#' + result.position;
+      document.getElementById('doneTitle').textContent = "You're in, " + result.player.name + '!';
+      headline.textContent = 'See you on court.';
+      formView.hidden = true;
+      doneView.hidden = false;
+      ball.classList.remove('hop');
+      void ball.offsetWidth;
+      ball.classList.add('hop');
+    }
+
+    joinBtn.onclick = submit;
+    input.addEventListener('input', () => { field.classList.remove('invalid'); errEl.textContent = ''; });
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    document.getElementById('againBtn').onclick = () => {
+      input.value = '';
+      headline.textContent = 'Get in line.';
+      doneView.hidden = true;
+      formView.hidden = false;
+      input.focus();
+    };
+  </script>
+</body>
+</html>
