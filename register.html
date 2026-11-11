@@ -265,7 +265,7 @@
 
       if (!result || result.error) { fail((result && result.error) || 'Something went wrong. Try again.'); return; }
 
-      document.getElementById('spot').textContent = '#' + result.position;
+     
       document.getElementById('doneTitle').textContent = "You're in, " + result.player.name + '!';
       headline.textContent = 'See you on court.';
       formView.hidden = true;
