@@ -464,7 +464,6 @@ function renderTop3() {
         </div>
         <div class="row-right">
           <span class="games-tag">${d > 0 ? '+' : ''}${d} pts</span>
-          <span class="games-tag">${gamesPlayedOf(p.id)}/${MAX_GAMES} games</span>
           <span class="wins">${p.wins || 0} win${(p.wins || 0) === 1 ? '' : 's'}</span>
         </div>
       </div>`;
