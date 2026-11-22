@@ -1,7 +1,7 @@
 /* ---------- State ---------- */
 let players     = load('cq_players', []);
 let queue       = load('cq_queue', []);
-let courts      = loadCourts();          // [Court 1, Court 2] ? each is null or {teamA, teamB, start}
+let courts      = loadCourts();          // [Court 1, Court 2] - each is null or {teamA, teamB, start}
 let history     = load('cq_history', []);       // every pair that has been TEAMMATES (one entry per game per team)
 let oppHistory  = load('cq_oppHistory', []);    // every pair that has been OPPONENTS (4 entries per game)
 let matchHistory = load('cq_matchHistory', []);  // completed matches with scores
@@ -94,21 +94,10 @@ function isPlayerOnAnyCourt(id) {
 }
 
 /* ---------- Pair counting ----------
-
-   THE BUG (why the same 4 kept playing each other):
-   1. Who plays next was decided ONLY by queue order + rest counters. The
-      winners and losers of a game are pushed to the back of the queue
-      together, so they came back out together as one block of 4 — the
-      same 4 people playing each other again and again, just re-split
-      into different teams. Players 5, 6, 7... never got mixed in.
-   2. The old history only remembered TEAMMATES as a yes/no flag, and
-      never remembered OPPONENTS at all. After a few games every pair was
-      "already used", so the check stopped helping.
-
-   THE FIX: remember how many times every pair has been teammates AND
-   opponents, then choose the group of 4 (and the split into teams) that
-   has played together the LEAST. Everything is still deterministic, so
-   the Next/Later preview always matches what actually happens. */
+   Remember how many times every pair has been teammates AND opponents,
+   then choose the group of 4 (and the split into teams) that has played
+   together the LEAST. Everything is deterministic, so the Next/Later
+   preview always matches what actually happens. */
 
 function countPairs(list) {
   const m = {};
@@ -192,8 +181,7 @@ function recordMatchup(teams) {
 /* How many rested players (from the front of the line) are considered
    when picking the next 4. The person who has waited longest is ALWAYS
    included; the other 3 are chosen from this window to be the people
-   they've played with least. Bigger = more mixing, smaller = stricter
-   first-come-first-served. */
+   they've played with least. */
 const MIX_WINDOW = 8;
 
 /* Queue ranked by: least rest remaining first, then FIFO. */
@@ -305,7 +293,7 @@ function addPlayer(name) {
 
   const p = { id: uid(), name, wins: 0, skip: 0, gamesPlayed: 0 };
   players.push(p);
-  queue.push(p.id); // new players always join at the back — fair line
+  queue.push(p.id); // new players always join at the back - fair line
   save();
   render();
 }
@@ -390,9 +378,17 @@ function openStartGameModal() {
   document.getElementById('cancelStart').onclick = closeModal;
 }
 
-function endGame(courtIndex, scoreA, scoreB) {
+function endGame(courtIndex, scoreA, scoreB, expectedStart) {
   const court = courts[courtIndex];
   if (!court) return;
+
+  // The game on this court changed while the modal was open: don't score the wrong game
+  if (expectedStart && court.start !== expectedStart) {
+    alert('This game has already changed. Please reopen it and enter the score again.');
+    closeModal();
+    render();
+    return;
+  }
 
   const a = Number(scoreA);
   const b = Number(scoreB);
@@ -423,10 +419,14 @@ function endGame(courtIndex, scoreA, scoreB) {
     if (p) { p.skip = 2; }
   });
 
+  // Save names too, so removing/replacing a player never blanks old results
+  const nameOf = id => (playerById(id) || { name: '—' }).name;
   matchHistory.push({
     court: courtIndex + 1,
     teamA: court.teamA.slice(),
     teamB: court.teamB.slice(),
+    teamANames: court.teamA.map(nameOf),
+    teamBNames: court.teamB.map(nameOf),
     scoreA: a,
     scoreB: b,
     winner,
@@ -437,7 +437,7 @@ function endGame(courtIndex, scoreA, scoreB) {
   gameTimes.push(duration);
   if (gameTimes.length > 20) gameTimes = gameTimes.slice(-20);
 
-  // Finished players go to the BACK of the queue ? no cutting ahead.
+  // Finished players go to the BACK of the queue - no cutting ahead.
   // Players who reached the 7-game limit can no longer be queued.
   finishedIds.forEach(id => {
     if (!isMaxedOut(id)) queue.push(id);
@@ -498,6 +498,8 @@ const els = {
   liveCount: document.getElementById('liveCount'),
   top3List: document.getElementById('top3List'),
   queueList: document.getElementById('queueList'),
+  maxedList: document.getElementById('maxedList'),
+  matchList: document.getElementById('matchList'),
   leaderList: document.getElementById('leaderList'),
   navQueueCount: document.getElementById('navQueueCount'),
   capacityCount: document.getElementById('capacityCount'),
@@ -540,7 +542,9 @@ function renderCourt() {
           </div>
           <div class="court-empty">
             <p>Court is free. ${queue.length < 4
-              ? `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`
+              ? (players.some(isMaxedOut)
+                  ? `Not enough players left (some already finished ${MAX_GAMES} games). Add more players to keep playing.`
+                  : `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`)
               : 'Ready to start the next game.'}</p>
           </div>
         </div>`;
@@ -556,12 +560,12 @@ function renderCourt() {
         <div class="matchup">
           <div class="team">
             <i class="fas fa-users"></i>
-            <span>${teamName(court.teamA)}</span>
+            <span>${escapeHtml(teamName(court.teamA))}</span>
           </div>
           <div class="vs">VS</div>
           <div class="team">
             <i class="fas fa-users"></i>
-            <span>${teamName(court.teamB)}</span>
+            <span>${escapeHtml(teamName(court.teamB))}</span>
           </div>
         </div>
         <button class="btn-end" data-endcourt="${i}">
@@ -575,10 +579,36 @@ function renderCourt() {
   });
 }
 
+/* Points scored / conceded per player, from saved match scores */
+function playerStats() {
+  const s = {};
+  players.forEach(p => { s[p.id] = { pf: 0, pa: 0 }; });
+  matchHistory.forEach(m => {
+    (m.teamA || []).forEach(id => { if (s[id]) { s[id].pf += m.scoreA; s[id].pa += m.scoreB; } });
+    (m.teamB || []).forEach(id => { if (s[id]) { s[id].pf += m.scoreB; s[id].pa += m.scoreA; } });
+  });
+  return s;
+}
+
+/* Ranking: wins, then point difference, then points scored, then name */
+function rankedPlayers() {
+  const st = playerStats();
+  const diff = p => st[p.id].pf - st[p.id].pa;
+  return [...players].sort((a, b) =>
+    (b.wins || 0) - (a.wins || 0) ||
+    diff(b) - diff(a) ||
+    st[b.id].pf - st[a.id].pf ||
+    a.name.localeCompare(b.name)
+  );
+}
+
 function leaderRow(p, i, top3) {
   const rankClass = i === 0 ? 'r1' : i === 1 ? 'r2' : i === 2 ? 'r3' : '';
   const canPrint = i < 3;
   const played = p.gamesPlayed || 0;
+  const st = playerStats()[p.id] || { pf: 0, pa: 0 };
+  const d = st.pf - st.pa;
+  const diffTag = `${d > 0 ? '+' : ''}${d} pts`;
   const limitTag = played >= MAX_GAMES ? ' <i class="fas fa-check-circle" aria-hidden="true"></i> Max reached' : '';
   return `
     <div class="list-row leader-row ${top3 ? 'top3' : ''}">
@@ -588,6 +618,7 @@ function leaderRow(p, i, top3) {
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
         <span class="wins">${p.wins} win${p.wins === 1 ? '' : 's'}</span>
+        <span class="row-meta" title="Point difference">${diffTag}</span>
         <span class="row-meta">${played}/${MAX_GAMES} games${limitTag}</span>
         ${canPrint ? `<button class="btn-certificate" data-cert="${p.id}" title="Print certificate"><i class="fas fa-award"></i></button>` : ''}
       </div>
@@ -595,7 +626,7 @@ function leaderRow(p, i, top3) {
 }
 
 function renderTop3() {
-  const top = [...players].sort((a, b) => b.wins - a.wins).slice(0, 3);
+  const top = rankedPlayers().slice(0, 3);
   if (!top.length) {
     els.top3List.innerHTML = `<div class="empty-state">No games finished yet.</div>`;
     return;
@@ -605,7 +636,7 @@ function renderTop3() {
 }
 
 function renderLeaders() {
-  const sorted = [...players].sort((a, b) => b.wins - a.wins);
+  const sorted = rankedPlayers();
   if (!sorted.length) {
     els.leaderList.innerHTML = `<div class="empty-state">Add players to start tracking wins.</div>`;
     return;
@@ -678,6 +709,51 @@ function renderQueue() {
   });
 }
 
+/* Players who reached the max games: no longer in the queue, so show them here */
+function renderMaxed() {
+  const el = els.maxedList;
+  if (!el) return;
+  const done = players.filter(p => isMaxedOut(p));
+  if (!done.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="queue-group" style="margin-top:22px">
+      <div class="queue-group-head">
+        <span class="queue-group-title">FINISHED · ${done.length} reached ${MAX_GAMES} games</span>
+      </div>
+      <div class="queue-players">
+        ${done.map(p => `<span class="player-chip">${escapeHtml(p.name)}
+          <span class="chip-meta"><i class="fas fa-check-circle" aria-hidden="true"></i> ${p.wins} win${p.wins === 1 ? '' : 's'}</span></span>`).join('')}
+      </div>
+    </div>`;
+}
+
+function matchNames(m, side) {
+  const names = side === 'A' ? m.teamANames : m.teamBNames;
+  const ids   = side === 'A' ? m.teamA : m.teamB;
+  const list  = names || ids.map(id => (playerById(id) || { name: '—' }).name);
+  return list.map(escapeHtml).join(' &amp; ');
+}
+
+/* Score history (latest 15) */
+function renderMatches() {
+  const el = els.matchList;
+  if (!el) return;
+  if (!matchHistory.length) {
+    el.innerHTML = `<div class="empty-state">No scores recorded yet.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="list-card">${
+    [...matchHistory].reverse().slice(0, 15).map(m => `
+      <div class="list-row">
+        <div class="row-left">
+          <span class="row-meta">C${m.court}</span>
+          <span class="name">${matchNames(m, 'A')} <b>${m.scoreA}</b> – <b>${m.scoreB}</b> ${matchNames(m, 'B')}</span>
+        </div>
+        <span class="row-meta">${Math.max(1, Math.round((m.durationMs || 0) / 60000))}m</span>
+      </div>`).join('')
+  }</div>`;
+}
+
 function renderStats() {
   if (gameTimes.length) {
     const avgMs = gameTimes.reduce((a, b) => a + b, 0) / gameTimes.length;
@@ -717,7 +793,9 @@ function render() {
   renderCourt();
   renderTop3();
   renderQueue();
+  renderMaxed();
   renderLeaders();
+  renderMatches();
   renderNextGames();
   renderStats();
 }
@@ -795,7 +873,8 @@ function openAddPlayerModal() {
 function openEndGameModal(courtIndex) {
   const court = courts[courtIndex];
   if (!court) return;
-  modalTitle.textContent = `Court ${courtIndex + 1} ? Enter score`;
+  const gameStart = court.start; // remember which game this modal is for
+  modalTitle.textContent = `Court ${courtIndex + 1} - Enter score`;
   modalBody.innerHTML = `
     <div style="display:grid;gap:14px;">
       <div style="display:grid;grid-template-columns:1fr 120px;gap:12px;align-items:center;">
@@ -835,7 +914,7 @@ function openEndGameModal(courtIndex) {
       return;
     }
     err.textContent = '';
-    endGame(courtIndex, a, b);
+    endGame(courtIndex, a, b, gameStart);
   };
 
   scoreA.focus();
@@ -860,7 +939,7 @@ document.getElementById('startGameBtn').onclick = (e) => {
 
 /* ---------- Certificate ---------- */
 function showCertificate(player) {
-  const sorted = [...players].sort((a, b) => b.wins - a.wins);
+  const sorted = rankedPlayers();
   const rank = sorted.findIndex(p => p.id === player.id) + 1;
   const rankNames = ['1st Place', '2nd Place', '3rd Place'];
   const rankTitle = rank <= 3 ? rankNames[rank - 1] : `#${rank}`;

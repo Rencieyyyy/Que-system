@@ -4,6 +4,7 @@ let queue = [];
 let courts = [null, null]; // courts[0] = Court 1, courts[1] = Court 2
 let history = [];          // teammate pairs (written by admin)
 let oppHistory = [];       // opponent pairs (written by admin)
+let matchHistory = [];     // finished games with scores (written by admin)
 let courtStartTimes = [null, null];
 let lastCourtsKey = null;
 
@@ -64,7 +65,7 @@ function loadCourts() {
 }
 
 /* ==========================================================================
-   MATCHMAKING — MUST STAY IDENTICAL TO THE ADMIN PAGE (courtqueue.js)
+   MATCHMAKING - MUST STAY IDENTICAL TO THE ADMIN PAGE (index.js)
    This page and the admin page are separate scripts with no shared runtime,
    so both run the exact same deterministic logic on the same saved data
    (players, queue, history, oppHistory). Same inputs = same Next/Later
@@ -292,7 +293,7 @@ function renderCourt() {
   const liveDot = document.getElementById('liveDot');
   const panel = document.getElementById('inPlayPanel');
 
-  const key = getCourtsKey(courts);
+  const key = getCourtsKey(courts) + '#' + players.map(p => p.id + ':' + p.name).join(',');
 
   // Only rebuild when the courts actually change (keeps timers smooth)
   if (key === lastCourtsKey) return;
@@ -394,9 +395,57 @@ function renderNextGames() {
   }).join('');
 }
 
+/* Latest 4 finished games with scores (winner highlighted) */
+function renderResults() {
+  const el = document.getElementById('resultsList');
+  if (!el) return;
+  const recent = matchHistory.slice(-4).reverse();
+  if (!recent.length) {
+    el.innerHTML = `<div class="empty-msg">No scores yet</div>`;
+    return;
+  }
+  const names = (saved, ids) =>
+    (saved || ids.map(id => (playerById(id) || { name: '—' }).name))
+      .map(escapeHtml).join(' &amp; ');
+
+  el.innerHTML = recent.map(m => {
+    const aWin = m.winner === 'A';
+    return `
+      <div class="result-row">
+        <span class="result-court">C${m.court}</span>
+        <span class="result-team ${aWin ? 'win' : ''}">${names(m.teamANames, m.teamA)}</span>
+        <span class="result-score"><b class="${aWin ? 'win' : ''}">${m.scoreA}</b> – <b class="${aWin ? '' : 'win'}">${m.scoreB}</b></span>
+        <span class="result-team right ${aWin ? '' : 'win'}">${names(m.teamBNames, m.teamB)}</span>
+      </div>`;
+  }).join('');
+}
+
+/* Points scored / conceded per player, from saved match scores */
+function playerStats() {
+  const s = {};
+  players.forEach(p => { s[p.id] = { pf: 0, pa: 0 }; });
+  matchHistory.forEach(m => {
+    (m.teamA || []).forEach(id => { if (s[id]) { s[id].pf += m.scoreA; s[id].pa += m.scoreB; } });
+    (m.teamB || []).forEach(id => { if (s[id]) { s[id].pf += m.scoreB; s[id].pa += m.scoreA; } });
+  });
+  return s;
+}
+
+/* Ranking: wins, then point difference, then points scored, then name */
+function rankedPlayers() {
+  const st = playerStats();
+  const diff = p => st[p.id].pf - st[p.id].pa;
+  return [...players].sort((a, b) =>
+    (b.wins || 0) - (a.wins || 0) ||
+    diff(b) - diff(a) ||
+    st[b.id].pf - st[a.id].pf ||
+    a.name.localeCompare(b.name)
+  );
+}
+
 function renderTop3() {
   const el = document.getElementById('top3List');
-  const top = [...players].sort((a, b) => b.wins - a.wins).slice(0, 3);
+  const top = rankedPlayers().slice(0, 3);
 
   if (!top.length) {
     el.innerHTML = `<div class="empty-msg">No games finished yet</div>`;
@@ -405,23 +454,30 @@ function renderTop3() {
 
   el.innerHTML = top.map((p, i) => {
     const rankClass = i === 0 ? 'r1' : i === 1 ? 'r2' : 'r3';
+    const st = playerStats()[p.id] || { pf: 0, pa: 0 };
+    const d = st.pf - st.pa;
     return `
       <div class="list-row top3">
         <div class="row-left">
           <span class="rank-badge ${rankClass}">${i + 1}</span>
           <span class="name">${escapeHtml(p.name)}</span>
         </div>
-        <span class="wins">${p.wins || 0} win${(p.wins || 0) === 1 ? '' : 's'}</span>
+        <div class="row-right">
+          <span class="games-tag">${d > 0 ? '+' : ''}${d} pts</span>
+          <span class="games-tag">${gamesPlayedOf(p.id)}/${MAX_GAMES} games</span>
+          <span class="wins">${p.wins || 0} win${(p.wins || 0) === 1 ? '' : 's'}</span>
+        </div>
       </div>`;
   }).join('');
 }
 
 function render() {
-  players    = load('cq_players', []);
-  queue      = load('cq_queue', []);
-  courts     = loadCourts();
-  history    = load('cq_history', []);
-  oppHistory = load('cq_oppHistory', []);
+  players      = load('cq_players', []);
+  queue        = load('cq_queue', []);
+  courts       = loadCourts();
+  history      = load('cq_history', []);
+  oppHistory   = load('cq_oppHistory', []);
+  matchHistory = load('cq_matchHistory', []);
 
   // Also refresh logo in case admin changed it
   const latestLogo = load('cq_logo', null);
@@ -429,6 +485,7 @@ function render() {
 
   renderCourt();
   renderNextGames();
+  renderResults();
   renderTop3();
 }
 
