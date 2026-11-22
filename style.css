@@ -693,9 +693,26 @@ body.dark-mode .progress-track {
   flex-shrink: 0;
 }
 
+.rank-badge.r1,
+.rank-badge.r2,
+.rank-badge.r3 {
+  font-size: 0;
+  line-height: 1;
+}
+
+.rank-badge.r1::before,
+.rank-badge.r2::before,
+.rank-badge.r3::before {
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .rank-badge.r1 { background: #f59e0b; }
 .rank-badge.r2 { background: #94a3b8; }
 .rank-badge.r3 { background: #cd7f32; }
+.rank-badge.r1::before { content: "🥇"; }
+.rank-badge.r2::before { content: "🥈"; }
+.rank-badge.r3::before { content: "🥉"; }
 
 .name {
   font-weight: 600;
@@ -709,6 +726,18 @@ body.dark-mode .progress-track {
   border-radius: 20px;
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+.row-meta {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.chip-meta {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .btn-certificate {
@@ -832,7 +861,8 @@ body.dark-mode .progress-track {
   padding: 22px;
 }
 
-.modal-body input[type="text"] {
+.modal-body input[type="text"],
+.modal-body input[type="number"] {
   width: 100%;
   padding: 12px 14px;
   border: 1.5px solid var(--border);
@@ -845,7 +875,8 @@ body.dark-mode .progress-track {
   color: var(--text);
 }
 
-.modal-body input:focus {
+.modal-body input[type="text"]:focus,
+.modal-body input[type="number"]:focus {
   border-color: var(--primary);
 }
 

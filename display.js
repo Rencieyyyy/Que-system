@@ -30,6 +30,11 @@ function skipOf(id) {
   return p && typeof p.skip === 'number' && !isNaN(p.skip) ? p.skip : 0;
 }
 
+function gamesPlayedOf(id) {
+  const p = playerById(id);
+  return p && typeof p.gamesPlayed === 'number' && !isNaN(p.gamesPlayed) ? p.gamesPlayed : 0;
+}
+
 function pairKey(a, b) {
   return [a, b].sort().join('_');
 }
@@ -70,6 +75,7 @@ function loadCourts() {
 /* How many rested players (front of line) are considered for the next 4.
    Must equal MIX_WINDOW in the admin script. */
 const MIX_WINDOW = 8;
+const MAX_GAMES = 7;
 
 function countPairs(list) {
   const m = {};
@@ -144,7 +150,7 @@ function rankedQueue() {
   const onCourt = new Set();
   courts.forEach(c => { if (c) [...c.teamA, ...c.teamB].forEach(id => onCourt.add(id)); });
   return queue
-    .filter((id, i) => !onCourt.has(id) && queue.indexOf(id) === i)
+    .filter((id, i) => !onCourt.has(id) && queue.indexOf(id) === i && gamesPlayedOf(id) < MAX_GAMES)
     .map((id, index) => ({ id, index, player: playerById(id) }))
     .filter(entry => entry.player)
     .sort((a, b) => {
@@ -232,8 +238,11 @@ function miniPlayerBox(id) {
 const logoImg = document.getElementById('logoImg');
 const logoPlaceholder = document.getElementById('logoPlaceholder');
 
+let appliedLogoData = null;
+
 function applyLogo(data) {
-  if (!data) return;
+  if (!data || data === appliedLogoData) return;
+  appliedLogoData = data;
   logoImg.src = data;
   logoImg.hidden = false;
   logoPlaceholder.hidden = true;
@@ -402,7 +411,7 @@ function renderTop3() {
           <span class="rank-badge ${rankClass}">${i + 1}</span>
           <span class="name">${escapeHtml(p.name)}</span>
         </div>
-        <span class="wins">${p.wins} win${p.wins === 1 ? '' : 's'}</span>
+        <span class="wins">${p.wins || 0} win${(p.wins || 0) === 1 ? '' : 's'}</span>
       </div>`;
   }).join('');
 }

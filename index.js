@@ -1,11 +1,13 @@
 /* ---------- State ---------- */
 let players     = load('cq_players', []);
 let queue       = load('cq_queue', []);
-let courts      = loadCourts();          // [Court 1, Court 2] — each is null or {teamA, teamB, start}
+let courts      = loadCourts();          // [Court 1, Court 2] ? each is null or {teamA, teamB, start}
 let history     = load('cq_history', []);       // every pair that has been TEAMMATES (one entry per game per team)
 let oppHistory  = load('cq_oppHistory', []);    // every pair that has been OPPONENTS (4 entries per game)
-let matchHistory = load('cq_matchHistory', []);  // chronological list of full matchups (unused for now)
+let matchHistory = load('cq_matchHistory', []);  // completed matches with scores
 let gameTimes   = load('cq_gameTimes', []);
+
+const MAX_GAMES = 7;
 
 function load(key, fallback) {
   try {
@@ -28,18 +30,27 @@ function loadCourts() {
   return [legacy || null, null];
 }
 
-/* Make sure every player has a `skip` counter (games left to rest before
-   they're eligible again). Old saved data won't have this field. */
+/* Make sure every player has counters used by matchmaking/UI.
+   Old saved data may be missing these fields. */
 function normalizePlayers() {
   players.forEach(p => {
     if (typeof p.skip !== 'number' || isNaN(p.skip)) p.skip = 0;
+    if (typeof p.gamesPlayed !== 'number' || isNaN(p.gamesPlayed)) p.gamesPlayed = 0;
+    if (typeof p.wins !== 'number' || isNaN(p.wins)) p.wins = 0;
   });
 }
+
+function isMaxedOut(playerOrId) {
+  const p = typeof playerOrId === 'string' ? playerById(playerOrId) : playerOrId;
+  return !!p && (p.gamesPlayed || 0) >= MAX_GAMES;
+}
+
 normalizePlayers();
 syncQueueWithPlayers();
 
-/* Guarantee invariant: every player who exists and isn't currently on a
-   court is somewhere in the queue. Checked and repaired every render. */
+/* Guarantee invariant: every eligible player who exists and isn't currently
+   on a court is somewhere in the queue. Players who reached the max games
+   limit are kept out of the playable queue. Checked and repaired every render. */
 function syncQueueWithPlayers() {
   const onCourtIds = new Set();
   courts.forEach(c => {
@@ -49,14 +60,16 @@ function syncQueueWithPlayers() {
     }
   });
 
-  // Drop queue entries for players that no longer exist, duplicates, and
-  // anyone who is currently on a court
-  queue = queue.filter((id, i) =>
-    playerById(id) && !onCourtIds.has(id) && queue.indexOf(id) === i);
+  // Drop queue entries for players that no longer exist, duplicates,
+  // anyone who is currently on a court, or anyone who reached the max games limit
+  queue = queue.filter((id, i) => {
+    const p = playerById(id);
+    return p && !onCourtIds.has(id) && !isMaxedOut(p) && queue.indexOf(id) === i;
+  });
 
-  // Anyone not on court and missing from the queue gets appended to the back
+  // Anyone eligible, not on court, and missing from the queue gets appended to the back
   players.forEach(p => {
-    if (!onCourtIds.has(p.id) && !queue.includes(p.id)) {
+    if (!onCourtIds.has(p.id) && !isMaxedOut(p) && !queue.includes(p.id)) {
       queue.push(p.id);
     }
   });
@@ -68,6 +81,7 @@ function save() {
   localStorage.setItem('cq_courts', JSON.stringify(courts));
   localStorage.setItem('cq_history', JSON.stringify(history));
   localStorage.setItem('cq_oppHistory', JSON.stringify(oppHistory));
+  localStorage.setItem('cq_matchHistory', JSON.stringify(matchHistory));
   localStorage.setItem('cq_gameTimes', JSON.stringify(gameTimes));
   localStorage.removeItem('cq_court'); // legacy key no longer used
 }
@@ -186,7 +200,7 @@ const MIX_WINDOW = 8;
 function rankedQueue() {
   return queue
     .map((id, index) => ({ id, index, player: playerById(id) }))
-    .filter(entry => entry.player)
+    .filter(entry => entry.player && !isMaxedOut(entry.player))
     .sort((a, b) => {
       const skipDiff = a.player.skip - b.player.skip;
       if (skipDiff !== 0) return skipDiff;
@@ -289,7 +303,7 @@ function addPlayer(name) {
     return;
   }
 
-  const p = { id: uid(), name, wins: 0, skip: 0 };
+  const p = { id: uid(), name, wins: 0, skip: 0, gamesPlayed: 0 };
   players.push(p);
   queue.push(p.id); // new players always join at the back — fair line
   save();
@@ -326,7 +340,7 @@ function startGame(courtIndex) {
 
   const ids = pickNextFour();
   if (!ids) {
-    alert('Need at least 4 players in the queue to start a game.');
+    alert('Need at least 4 eligible players in the queue to start a game.');
     return;
   }
 
@@ -341,7 +355,7 @@ function startGame(courtIndex) {
 /* Decide whether to ask which court, auto-pick the only free one, or block */
 function openStartGameModal() {
   if (!pickNextFour()) {
-    alert('Need at least 4 players in the queue to start a game.');
+    alert('Need at least 4 eligible players in the queue to start a game.');
     return;
   }
 
@@ -376,28 +390,58 @@ function openStartGameModal() {
   document.getElementById('cancelStart').onclick = closeModal;
 }
 
-function endGame(winner, courtIndex) {
+function endGame(courtIndex, scoreA, scoreB) {
   const court = courts[courtIndex];
   if (!court) return;
 
+  const a = Number(scoreA);
+  const b = Number(scoreB);
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a === b) {
+    return;
+  }
+
+  const winner = a > b ? 'A' : 'B';
   const winners = winner === 'A' ? court.teamA : court.teamB;
   const losers  = winner === 'A' ? court.teamB : court.teamA;
+  const finishedIds = [...court.teamA, ...court.teamB];
+  const endedAt = Date.now();
+  const duration = endedAt - court.start;
+
+  // Every participant played a game (max 7 per player)
+  finishedIds.forEach(id => {
+    const p = playerById(id);
+    if (p) p.gamesPlayed = (p.gamesPlayed || 0) + 1;
+  });
 
   // Winners rest 1 game, losers rest 2 games, before being eligible again
   winners.forEach(id => {
     const p = playerById(id);
-    if (p) { p.wins += 1; p.skip = 1; }
+    if (p) { p.wins = (p.wins || 0) + 1; p.skip = 1; }
   });
   losers.forEach(id => {
     const p = playerById(id);
     if (p) { p.skip = 2; }
   });
 
-  gameTimes.push(Date.now() - court.start);
+  matchHistory.push({
+    court: courtIndex + 1,
+    teamA: court.teamA.slice(),
+    teamB: court.teamB.slice(),
+    scoreA: a,
+    scoreB: b,
+    winner,
+    durationMs: duration,
+    endedAt
+  });
+
+  gameTimes.push(duration);
   if (gameTimes.length > 20) gameTimes = gameTimes.slice(-20);
 
-  // Finished players go to the BACK of the queue — no cutting ahead.
-  queue.push(...winners, ...losers);
+  // Finished players go to the BACK of the queue ? no cutting ahead.
+  // Players who reached the 7-game limit can no longer be queued.
+  finishedIds.forEach(id => {
+    if (!isMaxedOut(id)) queue.push(id);
+  });
 
   courts[courtIndex] = null;
 
@@ -421,6 +465,7 @@ function resetAll() {
   courts = [null, null];
   history = [];
   oppHistory = [];
+  matchHistory = [];
   teamsCache = {};
   gameTimes = [];
   save();
@@ -430,15 +475,18 @@ function resetAll() {
 function replacePlayer(oldId, newName) {
   if (!newName) return;
   const oldIndex = players.findIndex(p => p.id === oldId);
-  const newP = { id: uid(), name: newName, wins: 0, skip: 0 };
+  const newP = { id: uid(), name: newName, wins: 0, skip: 0, gamesPlayed: 0 };
   if (oldIndex !== -1) {
     players.splice(oldIndex, 1, newP);
   } else {
     players.push(newP);
   }
   queue = queue.map(pid => pid === oldId ? newP.id : pid);
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
   save();
   render();
+  window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' });
 }
 
 /* ---------- Rendering helpers ---------- */
@@ -530,17 +578,18 @@ function renderCourt() {
 function leaderRow(p, i, top3) {
   const rankClass = i === 0 ? 'r1' : i === 1 ? 'r2' : i === 2 ? 'r3' : '';
   const canPrint = i < 3;
-  const medals = ['🥇', '🥈', '🥉'];
-  const medal = i < 3 ? medals[i] : '';
+  const played = p.gamesPlayed || 0;
+  const limitTag = played >= MAX_GAMES ? ' <i class="fas fa-check-circle" aria-hidden="true"></i> Max reached' : '';
   return `
     <div class="list-row leader-row ${top3 ? 'top3' : ''}">
       <div class="row-left">
-        <span class="rank-badge ${rankClass}">${medal || i + 1}</span>
+        <span class="rank-badge ${rankClass}">${i < 3 ? '' : i + 1}</span>
         <span class="name">${escapeHtml(p.name)}</span>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
         <span class="wins">${p.wins} win${p.wins === 1 ? '' : 's'}</span>
-        ${canPrint ? `<button class="btn-certificate" data-cert="${p.id}" title="Print certificate">🎖️</button>` : ''}
+        <span class="row-meta">${played}/${MAX_GAMES} games${limitTag}</span>
+        ${canPrint ? `<button class="btn-certificate" data-cert="${p.id}" title="Print certificate"><i class="fas fa-award"></i></button>` : ''}
       </div>
     </div>`;
 }
@@ -581,7 +630,10 @@ function renderQueue() {
   els.capacityProgress.style.width = (players.length / 30 * 100) + '%';
 
   if (!queue.length) {
-    els.queueList.innerHTML = `<div class="empty-state">Nobody's waiting. Add players to build the queue.</div>`;
+    const msg = players.length
+      ? `No eligible players waiting. Each player can play up to ${MAX_GAMES} games.`
+      : `Nobody's waiting. Add players to build the queue.`;
+    els.queueList.innerHTML = `<div class="empty-state">${msg}</div>`;
     return;
   }
 
@@ -600,11 +652,13 @@ function renderQueue() {
         <div class="queue-players">
           ${g.map(id => {
             const p = playerById(id);
+            const played = p ? (p.gamesPlayed || 0) : 0;
             const restTag = p && p.skip > 0
-              ? ` <span style="font-size:0.75em;opacity:0.65;">(resting · ${p.skip} game${p.skip === 1 ? '' : 's'} left)</span>`
+              ? ` <span class="chip-meta"><i class="fas fa-clock" aria-hidden="true"></i> Resting: ${p.skip} left</span>`
               : '';
-            return `<span class="player-chip">${escapeHtml(p ? p.name : '—')}${restTag}
-              <button data-replace="${id}" title="Replace">↻</button>
+            const gamesTag = p ? ` <span class="chip-meta">${played}/${MAX_GAMES}</span>` : '';
+            return `<span class="player-chip">${escapeHtml(p ? p.name : '?')}${gamesTag}${restTag}
+              <button data-replace="${id}" title="Replace player" aria-label="Replace player"><i class="fas fa-right-left" aria-hidden="true"></i></button>
               <button data-remove="${id}" title="Remove">&times;</button></span>`;
           }).join('')}
         </div>
@@ -741,22 +795,55 @@ function openAddPlayerModal() {
 function openEndGameModal(courtIndex) {
   const court = courts[courtIndex];
   if (!court) return;
-  modalTitle.textContent = `Court ${courtIndex + 1} — Who won?`;
+  modalTitle.textContent = `Court ${courtIndex + 1} ? Enter score`;
   modalBody.innerHTML = `
-    <button class="win-option" data-winner="A">
-      <span class="wl">WINNER</span>
-      <span>${teamName(court.teamA)}</span>
-    </button>
-    <button class="win-option" data-winner="B">
-      <span class="wl">WINNER</span>
-      <span>${teamName(court.teamB)}</span>
-    </button>
-    <button class="btn btn-secondary" id="cancelEnd" style="width:100%;margin-top:8px">Cancel</button>`;
+    <div style="display:grid;gap:14px;">
+      <div style="display:grid;grid-template-columns:1fr 120px;gap:12px;align-items:center;">
+        <div>
+          <div style="font-size:0.78rem;font-weight:700;color:var(--text-muted);letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px;">Team A</div>
+          <div style="font-weight:700;color:var(--text);">${escapeHtml(teamName(court.teamA))}</div>
+        </div>
+        <input type="number" id="scoreA" min="0" step="1" inputmode="numeric" placeholder="0" aria-label="Team A score" style="margin-bottom:0;text-align:center;font-weight:700;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 120px;gap:12px;align-items:center;">
+        <div>
+          <div style="font-size:0.78rem;font-weight:700;color:var(--text-muted);letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px;">Team B</div>
+          <div style="font-weight:700;color:var(--text);">${escapeHtml(teamName(court.teamB))}</div>
+        </div>
+        <input type="number" id="scoreB" min="0" step="1" inputmode="numeric" placeholder="0" aria-label="Team B score" style="margin-bottom:0;text-align:center;font-weight:700;">
+      </div>
+      <div id="scoreError" style="min-height:1.2em;color:var(--danger);font-size:0.9rem;font-weight:600;"></div>
+      <div class="modal-row" style="margin-top:0;">
+        <button class="btn btn-secondary" id="cancelEnd">Cancel</button>
+        <button class="btn btn-primary" id="saveScore">Save score</button>
+      </div>
+    </div>`;
   overlay.classList.remove('hidden');
 
-  modalBody.querySelectorAll('[data-winner]').forEach(btn => {
-    btn.onclick = () => endGame(btn.getAttribute('data-winner'), courtIndex);
+  const scoreA = document.getElementById('scoreA');
+  const scoreB = document.getElementById('scoreB');
+  const err = document.getElementById('scoreError');
+  const submit = () => {
+    const a = Number(scoreA.value);
+    const b = Number(scoreB.value);
+    if (scoreA.value === '' || scoreB.value === '' || !Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) {
+      err.textContent = 'Enter a whole-number score for each team.';
+      return;
+    }
+    if (a === b) {
+      err.textContent = 'Scores cannot be tied. Enter the final score.';
+      return;
+    }
+    err.textContent = '';
+    endGame(courtIndex, a, b);
+  };
+
+  scoreA.focus();
+  [scoreA, scoreB].forEach(inp => {
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    inp.addEventListener('input', () => { err.textContent = ''; });
   });
+  document.getElementById('saveScore').onclick = submit;
   document.getElementById('cancelEnd').onclick = closeModal;
 }
 
@@ -843,8 +930,11 @@ function reloadState() {
   courts       = loadCourts();
   history      = load('cq_history', []);
   oppHistory   = load('cq_oppHistory', []);
+  matchHistory = load('cq_matchHistory', []);
   gameTimes    = load('cq_gameTimes', []);
+  teamsCache   = {};
   normalizePlayers();
   render();
 }
+
 window.cqOnRemoteChange = reloadState;
