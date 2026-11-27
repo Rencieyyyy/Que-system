@@ -6,6 +6,8 @@ let history     = load('cq_history', []);       // every pair that has been TEAM
 let oppHistory  = load('cq_oppHistory', []);    // every pair that has been OPPONENTS (4 entries per game)
 let matchHistory = load('cq_matchHistory', []);  // completed matches with scores
 let gameTimes   = load('cq_gameTimes', []);
+let lockedPairs = load('cq_lockedPairs', []);   // [[idA, idB], ...] fixed teammates
+let lockMode    = load('cq_lockMode', false) === true;
 
 const MAX_GAMES = 7;
 
@@ -52,6 +54,15 @@ syncQueueWithPlayers();
    on a court is somewhere in the queue. Players who reached the max games
    limit are kept out of the playable queue. Checked and repaired every render. */
 function syncQueueWithPlayers() {
+  // Clean locked pairs: both players must exist, no player in two pairs
+  const usedInPair = new Set();
+  lockedPairs = lockedPairs.filter(pr =>
+    Array.isArray(pr) && pr.length === 2 && pr[0] !== pr[1] &&
+    playerById(pr[0]) && playerById(pr[1]) &&
+    !usedInPair.has(pr[0]) && !usedInPair.has(pr[1]) &&
+    (usedInPair.add(pr[0]), usedInPair.add(pr[1]), true)
+  );
+
   const onCourtIds = new Set();
   courts.forEach(c => {
     if (c) {
@@ -83,6 +94,8 @@ function save() {
   localStorage.setItem('cq_oppHistory', JSON.stringify(oppHistory));
   localStorage.setItem('cq_matchHistory', JSON.stringify(matchHistory));
   localStorage.setItem('cq_gameTimes', JSON.stringify(gameTimes));
+  localStorage.setItem('cq_lockedPairs', JSON.stringify(lockedPairs));
+  localStorage.setItem('cq_lockMode', JSON.stringify(lockMode));
   localStorage.removeItem('cq_court'); // legacy key no longer used
 }
 
@@ -115,6 +128,11 @@ function togetherScore(a, b, tm, opp) {
 /* ---------- Smart team formation ---------- */
 function formTeams(ids) {
   const [a, b, c, d] = ids;
+
+  // Locked teammates: two locked pairs always play as the two teams
+  if (lockMode && partnerOf(a) === b && partnerOf(c) === d) {
+    return { teamA: [a, b], teamB: [c, d] };
+  }
   const tm  = countPairs(history);
   const opp = countPairs(oppHistory);
 
@@ -156,7 +174,7 @@ function stableShuffleIndex(seedStr, mod) {
 let teamsCache = {};
 
 function teamsCacheKey(ids) {
-  return [...ids].sort().join('_') + '|' + history.length;
+  return [...ids].sort().join('_') + '|' + history.length + '|' + lockSig();
 }
 
 function formTeamsStable(ids) {
@@ -236,8 +254,76 @@ function bestMixedFour(candidates) {
   return best;
 }
 
+/* ---------- Locked teammates ----------
+   When "Lock teammates" is ON, admin sets fixed pairs. A pair always plays
+   together (same team every game) and only the opponents change. */
+const LOCK_WINDOW = 6;
+
+function skipOf(id) {
+  const p = playerById(id);
+  return p && typeof p.skip === 'number' && !isNaN(p.skip) ? p.skip : 0;
+}
+
+function partnerOf(id) {
+  for (const pr of lockedPairs) {
+    if (pr[0] === id) return pr[1];
+    if (pr[1] === id) return pr[0];
+  }
+  return null;
+}
+
+function lockSig() {
+  return lockMode ? lockedPairs.map(p => p.join('+')).join(',') : 'off';
+}
+
+/* Pairs where BOTH partners are in the ranked list, longest-waiting first */
+function lockedUnits(ranked) {
+  const pos = new Map(ranked.map((id, i) => [id, i]));
+  const seen = new Set();
+  const units = [];
+  ranked.forEach(id => {
+    if (seen.has(id)) return;
+    const mate = partnerOf(id);
+    if (mate && pos.has(mate) && !seen.has(mate)) {
+      seen.add(id); seen.add(mate);
+      units.push([id, mate]);
+    }
+  });
+  const rest = u => Math.max(skipOf(u[0]), skipOf(u[1]));
+  const first = u => Math.min(pos.get(u[0]), pos.get(u[1]));
+  return units.sort((a, b) => (rest(a) - rest(b)) || (first(a) - first(b)));
+}
+
+/* Pick 2 pairs: the longest-waiting pair + the pair they've faced least.
+   Opponents are only chosen from the pairs with the least rest remaining. */
+function pickLockedFour(ranked) {
+  const units = lockedUnits(ranked);
+  if (units.length < 2) return null;
+
+  const rest = u => Math.max(skipOf(u[0]), skipOf(u[1]));
+  const head = units[0];
+  const pool = units.slice(1, LOCK_WINDOW + 1).filter(u => rest(u) <= rest(units[1]));
+
+  const opp = countPairs(oppHistory);
+  let best = pool[0];
+  let bestScore = Infinity;
+  pool.forEach(u => {
+    let score = 0;
+    head.forEach(x => u.forEach(y => { score += opp[pairKey(x, y)] || 0; }));
+    if (score < bestScore) { best = u; bestScore = score; }
+  });
+  return [...head, ...best];
+}
+
+function noGameMessage() {
+  return lockMode
+    ? 'Need at least 2 locked pairs ready in the queue to start a game.'
+    : 'Need at least 4 eligible players in the queue to start a game.';
+}
+
 /* Pick 4 from an already-ranked list, or null if fewer than 4 exist. */
 function pickFourFrom(ranked) {
+  if (lockMode) return pickLockedFour(ranked);
   if (ranked.length < 4) return null;
 
   const rested = ranked.filter(id => playerById(id).skip === 0);
@@ -270,7 +356,11 @@ function buildGroups(maxGroups = Infinity) {
   let guard = 0; // hard stop so a bad state can never loop forever
   while (pool.length && groups.length < maxGroups && guard++ < 50) {
     const g = pickFourFrom(pool);
-    if (!g) { groups.push(pool); break; }
+    if (!g) {
+      const rest = lockMode ? lockedUnits(pool).flat() : pool;
+      if (rest.length) groups.push(rest);
+      break;
+    }
     groups.push(g);
     pool = pool.filter(id => !g.includes(id));
   }
@@ -306,6 +396,8 @@ function removePlayer(id) {
 
   queue = queue.filter(pid => pid !== id);
   players = players.filter(p => p.id !== id);
+  lockedPairs = lockedPairs.filter(pr => !pr.includes(id));
+  teamsCache = {};
   save();
   render();
 }
@@ -328,7 +420,7 @@ function startGame(courtIndex) {
 
   const ids = pickNextFour();
   if (!ids) {
-    alert('Need at least 4 eligible players in the queue to start a game.');
+    alert(noGameMessage());
     return;
   }
 
@@ -343,7 +435,7 @@ function startGame(courtIndex) {
 /* Decide whether to ask which court, auto-pick the only free one, or block */
 function openStartGameModal() {
   if (!pickNextFour()) {
-    alert('Need at least 4 eligible players in the queue to start a game.');
+    alert(noGameMessage());
     return;
   }
 
@@ -482,6 +574,8 @@ function replacePlayer(oldId, newName) {
     players.push(newP);
   }
   queue = queue.map(pid => pid === oldId ? newP.id : pid);
+  lockedPairs = lockedPairs.map(pr => pr.map(pid => pid === oldId ? newP.id : pid));
+  teamsCache = {};
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
   save();
@@ -541,7 +635,7 @@ function renderCourt() {
             <span class="court-name">Court ${courtNum}</span>
           </div>
           <div class="court-empty">
-            <p>Court is free. ${queue.length < 4
+            <p>Court is free. ${(lockMode && !pickNextFour()) ? 'Waiting for 2 locked pairs to be ready.' : queue.length < 4
               ? (players.some(isMaxedOut)
                   ? `Not enough players left (some already finished ${MAX_GAMES} games). Add more players to keep playing.`
                   : `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`)
@@ -672,6 +766,24 @@ function renderQueue() {
   // matches who actually plays next.
   const groups = buildGroups();
 
+  // Lock mode: players without a ready partner don't appear in any group
+  const inGroups = new Set(groups.flat());
+  const leftover = lockMode ? rankedQueue().filter(id => !inGroups.has(id)) : [];
+  const leftoverHtml = leftover.length ? `
+      <div class="queue-group">
+        <div class="queue-group-head">
+          <span class="queue-group-title">WAITING FOR A PARTNER · ${leftover.length}</span>
+        </div>
+        <div class="queue-players">
+          ${leftover.map(id => {
+            const p = playerById(id);
+            return `<span class="player-chip">${escapeHtml(p ? p.name : '?')}
+              <button data-replace="${id}" title="Replace player" aria-label="Replace player"><i class="fas fa-right-left" aria-hidden="true"></i></button>
+              <button data-remove="${id}" title="Remove">&times;</button></span>`;
+          }).join('')}
+        </div>
+      </div>` : '';
+
   els.queueList.innerHTML = `<div class="list-card">${
     groups.map((g, gi) => `
       <div class="queue-group">
@@ -693,7 +805,7 @@ function renderQueue() {
               <button data-remove="${id}" title="Remove">&times;</button></span>`;
           }).join('')}
         </div>
-      </div>`).join('')
+      </div>`).join('') + leftoverHtml
   }</div>`;
 
   els.queueList.querySelectorAll('[data-remove]').forEach(btn => {
@@ -788,8 +900,86 @@ function renderNextGames() {
   }).join('');
 }
 
+/* ---------- Lock teammates panel (Players tab) ---------- */
+const lockPanel = document.createElement('div');
+lockPanel.id = 'lockPanel';
+els.queueList.parentNode.insertBefore(lockPanel, els.queueList);
+
+function renderLockPanel() {
+  const prev1 = (document.getElementById('lockP1') || {}).value || '';
+  const prev2 = (document.getElementById('lockP2') || {}).value || '';
+  const pairedIds = new Set(lockedPairs.flat());
+  const unpaired = players.filter(p => !pairedIds.has(p.id) && !isMaxedOut(p));
+  const nameOf = id => (playerById(id) || { name: '?' }).name;
+  const opts = sel => `<option value="">Select player</option>` + unpaired.map(p =>
+    `<option value="${p.id}"${p.id === sel ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+  const selStyle = 'flex:1;min-width:130px;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-size:0.95rem;';
+
+  lockPanel.innerHTML = `
+    <div class="capacity-card">
+      <div class="capacity-top" style="margin-bottom:10px">
+        <div>
+          <h3><i class="fas fa-lock" aria-hidden="true"></i> Lock Teammates</h3>
+          <p>Locked pairs stay teammates all game. Only the opponents change.</p>
+        </div>
+        <button class="btn ${lockMode ? 'btn-primary' : 'btn-outline'}" id="lockToggle">${lockMode ? 'ON' : 'OFF'}</button>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <select id="lockP1" style="${selStyle}">${opts(prev1)}</select>
+        <select id="lockP2" style="${selStyle}">${opts(prev2)}</select>
+        <button class="btn btn-primary" id="lockAdd"><i class="fas fa-link" aria-hidden="true"></i> Lock pair</button>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-outline" id="lockAuto"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Auto-pair the rest</button>
+        ${lockedPairs.length ? `<button class="btn btn-ghost" id="lockClear">Unlock all</button>` : ''}
+      </div>
+
+      ${lockedPairs.length ? `<div class="queue-players">${lockedPairs.map((pr, i) => `
+        <span class="player-chip">${escapeHtml(nameOf(pr[0]))} &amp; ${escapeHtml(nameOf(pr[1]))}
+          <button data-unlock="${i}" title="Unlock this pair">&times;</button></span>`).join('')}</div>`
+        : `<div class="empty-state" style="padding:8px">No locked pairs yet.</div>`}
+
+      ${lockMode && unpaired.length ? `<p style="margin-top:10px;font-size:0.85rem;color:var(--text-muted)">
+        Not paired (can't be picked until paired): ${unpaired.map(p => escapeHtml(p.name)).join(', ')}</p>` : ''}
+    </div>`;
+
+  const changed = () => { teamsCache = {}; save(); render(); };
+
+  document.getElementById('lockToggle').onclick = () => { lockMode = !lockMode; changed(); };
+
+  document.getElementById('lockAdd').onclick = () => {
+    const a = document.getElementById('lockP1').value;
+    const b = document.getElementById('lockP2').value;
+    if (!a || !b) { alert('Pick two players.'); return; }
+    if (a === b) { alert('Pick two different players.'); return; }
+    lockedPairs.push([a, b]);
+    changed();
+  };
+
+  document.getElementById('lockAuto').onclick = () => {
+    const taken = new Set(lockedPairs.flat());
+    const order = [...queue, ...players.map(p => p.id)]
+      .filter((id, i, arr) => arr.indexOf(id) === i && playerById(id) && !taken.has(id) && !isMaxedOut(id));
+    for (let i = 0; i + 1 < order.length; i += 2) lockedPairs.push([order[i], order[i + 1]]);
+    changed();
+  };
+
+  const clearBtn = document.getElementById('lockClear');
+  if (clearBtn) clearBtn.onclick = () => { lockedPairs = []; changed(); };
+
+  lockPanel.querySelectorAll('[data-unlock]').forEach(btn => {
+    btn.onclick = () => {
+      lockedPairs.splice(parseInt(btn.getAttribute('data-unlock'), 10), 1);
+      changed();
+    };
+  });
+}
+
 function render() {
   syncQueueWithPlayers();
+  renderLockPanel();
   renderCourt();
   renderTop3();
   renderQueue();
@@ -1011,6 +1201,8 @@ function reloadState() {
   oppHistory   = load('cq_oppHistory', []);
   matchHistory = load('cq_matchHistory', []);
   gameTimes    = load('cq_gameTimes', []);
+  lockedPairs  = load('cq_lockedPairs', []);
+  lockMode     = load('cq_lockMode', false) === true;
   teamsCache   = {};
   normalizePlayers();
   render();

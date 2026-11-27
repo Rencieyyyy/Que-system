@@ -5,6 +5,8 @@ let courts = [null, null]; // courts[0] = Court 1, courts[1] = Court 2
 let history = [];          // teammate pairs (written by admin)
 let oppHistory = [];       // opponent pairs (written by admin)
 let matchHistory = [];     // finished games with scores (written by admin)
+let lockedPairs = [];      // fixed teammates (written by admin)
+let lockMode = false;
 let courtStartTimes = [null, null];
 let lastCourtsKey = null;
 
@@ -101,6 +103,11 @@ function stableShuffleIndex(seedStr, mod) {
 function formTeams(ids) {
   if (!ids || ids.length < 4) return null;
   const [a, b, c, d] = ids;
+
+  // Locked teammates: two locked pairs always play as the two teams
+  if (lockMode && partnerOf(a) === b && partnerOf(c) === d) {
+    return { teamA: [a, b], teamB: [c, d] };
+  }
   const tm  = countPairs(history);
   const opp = countPairs(oppHistory);
 
@@ -133,7 +140,7 @@ function formTeams(ids) {
 let teamsCache = {};
 
 function teamsCacheKey(ids) {
-  return [...ids].sort().join('_') + '|' + history.length + '|' + oppHistory.length;
+  return [...ids].sort().join('_') + '|' + history.length + '|' + oppHistory.length + '|' + lockSig();
 }
 
 function formTeamsStable(ids) {
@@ -200,7 +207,64 @@ function bestMixedFour(candidates) {
   return best;
 }
 
+/* ---------- Locked teammates ----------
+   When "Lock teammates" is ON, admin sets fixed pairs. A pair always plays
+   together (same team every game) and only the opponents change. */
+const LOCK_WINDOW = 6;
+
+function partnerOf(id) {
+  for (const pr of lockedPairs) {
+    if (pr[0] === id) return pr[1];
+    if (pr[1] === id) return pr[0];
+  }
+  return null;
+}
+
+function lockSig() {
+  return lockMode ? lockedPairs.map(p => p.join('+')).join(',') : 'off';
+}
+
+/* Pairs where BOTH partners are in the ranked list, longest-waiting first */
+function lockedUnits(ranked) {
+  const pos = new Map(ranked.map((id, i) => [id, i]));
+  const seen = new Set();
+  const units = [];
+  ranked.forEach(id => {
+    if (seen.has(id)) return;
+    const mate = partnerOf(id);
+    if (mate && pos.has(mate) && !seen.has(mate)) {
+      seen.add(id); seen.add(mate);
+      units.push([id, mate]);
+    }
+  });
+  const rest = u => Math.max(skipOf(u[0]), skipOf(u[1]));
+  const first = u => Math.min(pos.get(u[0]), pos.get(u[1]));
+  return units.sort((a, b) => (rest(a) - rest(b)) || (first(a) - first(b)));
+}
+
+/* Pick 2 pairs: the longest-waiting pair + the pair they've faced least.
+   Opponents are only chosen from the pairs with the least rest remaining. */
+function pickLockedFour(ranked) {
+  const units = lockedUnits(ranked);
+  if (units.length < 2) return null;
+
+  const rest = u => Math.max(skipOf(u[0]), skipOf(u[1]));
+  const head = units[0];
+  const pool = units.slice(1, LOCK_WINDOW + 1).filter(u => rest(u) <= rest(units[1]));
+
+  const opp = countPairs(oppHistory);
+  let best = pool[0];
+  let bestScore = Infinity;
+  pool.forEach(u => {
+    let score = 0;
+    head.forEach(x => u.forEach(y => { score += opp[pairKey(x, y)] || 0; }));
+    if (score < bestScore) { best = u; bestScore = score; }
+  });
+  return [...head, ...best];
+}
+
 function pickFourFrom(ranked) {
+  if (lockMode) return pickLockedFour(ranked);
   if (ranked.length < 4) return null;
 
   const rested = ranked.filter(id => skipOf(id) === 0);
@@ -219,7 +283,11 @@ function buildGroups(maxGroups = Infinity) {
   let guard = 0; // hard stop so a bad state can never loop forever
   while (pool.length && groups.length < maxGroups && guard++ < 50) {
     const g = pickFourFrom(pool);
-    if (!g) { groups.push(pool); break; }
+    if (!g) {
+      const rest = lockMode ? lockedUnits(pool).flat() : pool;
+      if (rest.length) groups.push(rest);
+      break;
+    }
     groups.push(g);
     pool = pool.filter(id => !g.includes(id));
   }
@@ -477,6 +545,8 @@ function render() {
   history      = load('cq_history', []);
   oppHistory   = load('cq_oppHistory', []);
   matchHistory = load('cq_matchHistory', []);
+  lockedPairs  = load('cq_lockedPairs', []);
+  lockMode     = load('cq_lockMode', false) === true;
 
   // Also refresh logo in case admin changed it
   const latestLogo = load('cq_logo', null);
