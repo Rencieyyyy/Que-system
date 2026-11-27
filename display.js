@@ -33,6 +33,10 @@ function skipOf(id) {
   return p && typeof p.skip === 'number' && !isNaN(p.skip) ? p.skip : 0;
 }
 
+function isMaxedOut(id) {
+  return gamesPlayedOf(id) >= MAX_GAMES;
+}
+
 function gamesPlayedOf(id) {
   const p = playerById(id);
   return p && typeof p.gamesPlayed === 'number' && !isNaN(p.gamesPlayed) ? p.gamesPlayed : 0;
@@ -105,7 +109,8 @@ function formTeams(ids) {
   const [a, b, c, d] = ids;
 
   // Locked teammates: two locked pairs always play as the two teams
-  if (lockMode && partnerOf(a) === b && partnerOf(c) === d) {
+  // (ids arrive as [team1, team1, team2, team2] from pickLockedFour)
+  if (lockMode) {
     return { teamA: [a, b], teamB: [c, d] };
   }
   const tm  = countPairs(history);
@@ -224,19 +229,47 @@ function lockSig() {
   return lockMode ? lockedPairs.map(p => p.join('+')).join(',') : 'off';
 }
 
-/* Pairs where BOTH partners are in the ranked list, longest-waiting first */
+/* Teams that are ready to play in lock mode:
+   - locked pairs where BOTH partners are ready, and
+   - unpaired players, teamed up two at a time (least-repeated teammates,
+     similar rest), so locked pairs always have opponents from the queue.
+   Longest-waiting teams first. */
 function lockedUnits(ranked) {
   const pos = new Map(ranked.map((id, i) => [id, i]));
   const seen = new Set();
   const units = [];
+  const free = [];
   ranked.forEach(id => {
     if (seen.has(id)) return;
     const mate = partnerOf(id);
-    if (mate && pos.has(mate) && !seen.has(mate)) {
-      seen.add(id); seen.add(mate);
-      units.push([id, mate]);
+    if (mate && playerById(mate) && !isMaxedOut(mate)) {
+      // Locked: plays only with this partner (waits if the partner is busy)
+      if (pos.has(mate) && !seen.has(mate)) {
+        seen.add(id); seen.add(mate);
+        units.push([id, mate]);
+      }
+    } else {
+      free.push(id); // not paired (or partner already finished all games)
     }
   });
+
+  const tm = countPairs(history);
+  const pool = free.slice();
+  while (pool.length >= 2) {
+    const h = pool.shift();
+    const win = [];
+    for (let i = 0; i < Math.min(pool.length, 6); i++) win.push(i);
+    const sameRest = win.filter(i => skipOf(pool[i]) === skipOf(h));
+    const cand = sameRest.length ? sameRest : win;
+    let bi = cand[0];
+    let bs = Infinity;
+    cand.forEach(i => {
+      const sc = tm[pairKey(h, pool[i])] || 0;
+      if (sc < bs) { bs = sc; bi = i; }
+    });
+    units.push([h, pool.splice(bi, 1)[0]]);
+  }
+
   const rest = u => Math.max(skipOf(u[0]), skipOf(u[1]));
   const first = u => Math.min(pos.get(u[0]), pos.get(u[1]));
   return units.sort((a, b) => (rest(a) - rest(b)) || (first(a) - first(b)));

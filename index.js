@@ -130,7 +130,8 @@ function formTeams(ids) {
   const [a, b, c, d] = ids;
 
   // Locked teammates: two locked pairs always play as the two teams
-  if (lockMode && partnerOf(a) === b && partnerOf(c) === d) {
+  // (ids arrive as [team1, team1, team2, team2] from pickLockedFour)
+  if (lockMode) {
     return { teamA: [a, b], teamB: [c, d] };
   }
   const tm  = countPairs(history);
@@ -276,19 +277,47 @@ function lockSig() {
   return lockMode ? lockedPairs.map(p => p.join('+')).join(',') : 'off';
 }
 
-/* Pairs where BOTH partners are in the ranked list, longest-waiting first */
+/* Teams that are ready to play in lock mode:
+   - locked pairs where BOTH partners are ready, and
+   - unpaired players, teamed up two at a time (least-repeated teammates,
+     similar rest), so locked pairs always have opponents from the queue.
+   Longest-waiting teams first. */
 function lockedUnits(ranked) {
   const pos = new Map(ranked.map((id, i) => [id, i]));
   const seen = new Set();
   const units = [];
+  const free = [];
   ranked.forEach(id => {
     if (seen.has(id)) return;
     const mate = partnerOf(id);
-    if (mate && pos.has(mate) && !seen.has(mate)) {
-      seen.add(id); seen.add(mate);
-      units.push([id, mate]);
+    if (mate && playerById(mate) && !isMaxedOut(mate)) {
+      // Locked: plays only with this partner (waits if the partner is busy)
+      if (pos.has(mate) && !seen.has(mate)) {
+        seen.add(id); seen.add(mate);
+        units.push([id, mate]);
+      }
+    } else {
+      free.push(id); // not paired (or partner already finished all games)
     }
   });
+
+  const tm = countPairs(history);
+  const pool = free.slice();
+  while (pool.length >= 2) {
+    const h = pool.shift();
+    const win = [];
+    for (let i = 0; i < Math.min(pool.length, 6); i++) win.push(i);
+    const sameRest = win.filter(i => skipOf(pool[i]) === skipOf(h));
+    const cand = sameRest.length ? sameRest : win;
+    let bi = cand[0];
+    let bs = Infinity;
+    cand.forEach(i => {
+      const sc = tm[pairKey(h, pool[i])] || 0;
+      if (sc < bs) { bs = sc; bi = i; }
+    });
+    units.push([h, pool.splice(bi, 1)[0]]);
+  }
+
   const rest = u => Math.max(skipOf(u[0]), skipOf(u[1]));
   const first = u => Math.min(pos.get(u[0]), pos.get(u[1]));
   return units.sort((a, b) => (rest(a) - rest(b)) || (first(a) - first(b)));
@@ -317,7 +346,7 @@ function pickLockedFour(ranked) {
 
 function noGameMessage() {
   return lockMode
-    ? 'Need at least 2 locked pairs ready in the queue to start a game.'
+    ? 'Need at least 4 ready players in the queue to start a game (a locked pair counts as 2).'
     : 'Need at least 4 eligible players in the queue to start a game.';
 }
 
@@ -635,7 +664,7 @@ function renderCourt() {
             <span class="court-name">Court ${courtNum}</span>
           </div>
           <div class="court-empty">
-            <p>Court is free. ${(lockMode && !pickNextFour()) ? 'Waiting for 2 locked pairs to be ready.' : queue.length < 4
+            <p>Court is free. ${(lockMode && !pickNextFour()) ? 'Waiting for enough players to start a game.' : queue.length < 4
               ? (players.some(isMaxedOut)
                   ? `Not enough players left (some already finished ${MAX_GAMES} games). Add more players to keep playing.`
                   : `Waiting on ${4 - queue.length} more player${4 - queue.length === 1 ? '' : 's'} to start a game.`)
@@ -772,7 +801,7 @@ function renderQueue() {
   const leftoverHtml = leftover.length ? `
       <div class="queue-group">
         <div class="queue-group-head">
-          <span class="queue-group-title">WAITING FOR A PARTNER · ${leftover.length}</span>
+          <span class="queue-group-title">WAITING FOR A TEAMMATE · ${leftover.length}</span>
         </div>
         <div class="queue-players">
           ${leftover.map(id => {
@@ -920,7 +949,7 @@ function renderLockPanel() {
       <div class="capacity-top" style="margin-bottom:10px">
         <div>
           <h3><i class="fas fa-lock" aria-hidden="true"></i> Lock Teammates</h3>
-          <p>Locked pairs stay teammates all game. Only the opponents change.</p>
+          <p>Locked pairs stay teammates all game and play against other players in the queue. Unpaired players are teamed up automatically as their opponents.</p>
         </div>
         <button class="btn ${lockMode ? 'btn-primary' : 'btn-outline'}" id="lockToggle">${lockMode ? 'ON' : 'OFF'}</button>
       </div>
@@ -942,7 +971,7 @@ function renderLockPanel() {
         : `<div class="empty-state" style="padding:8px">No locked pairs yet.</div>`}
 
       ${lockMode && unpaired.length ? `<p style="margin-top:10px;font-size:0.85rem;color:var(--text-muted)">
-        Not paired (can't be picked until paired): ${unpaired.map(p => escapeHtml(p.name)).join(', ')}</p>` : ''}
+        Not paired (teamed up automatically as opponents): ${unpaired.map(p => escapeHtml(p.name)).join(', ')}</p>` : ''}
     </div>`;
 
   const changed = () => { teamsCache = {}; save(); render(); };
